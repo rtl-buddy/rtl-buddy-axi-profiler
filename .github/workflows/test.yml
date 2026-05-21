@@ -12,6 +12,7 @@ on:
       - 'tests/**/*.py'
       - 'src/**/*.json'
       - 'src/**/*.md'
+      - 'tests/fixtures/**'
   pull_request:
     branches: [main]
     paths:
@@ -23,6 +24,7 @@ on:
       - 'tests/**/*.py'
       - 'src/**/*.json'
       - 'src/**/*.md'
+      - 'tests/fixtures/**'
 
 jobs:
   pytest:
