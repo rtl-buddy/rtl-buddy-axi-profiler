@@ -163,14 +163,44 @@ def discover_cmd(
 def gen_monitor(
     manifest: Path = typer.Argument(..., help="Input axi-bundles.yaml."),
     output: Path = typer.Option(Path("axi_perf_mon.sv"), "--output", "-o"),
+    time_precision: str = typer.Option(
+        "1ps",
+        "--time-precision",
+        help="IEEE-1800 timeprecision atom (1ns / 100ps / 1ps / …). "
+        "Must match the testbench's `timeprecision.",
+    ),
+    buffer_cap: int = typer.Option(
+        65536,
+        "--buffer-cap",
+        help="Per-bundle FIFO depth cap. Drained only at $finish.",
+    ),
 ) -> None:
-    """Generate the SV monitor for the stream ingest path. NOT YET IMPLEMENTED (#4)."""
-    typer.echo(
-        f"gen-monitor is not yet implemented — see "
-        f"rtl-buddy-axi-profiler#4. Args: manifest={manifest} -o {output}",
-        err=True,
+    """Generate the SV monitor for the stream ingest path.
+
+    Emits a ``bind``-style monitor by default — paste the printed
+    bind directive into your testbench. Explicit-instantiation
+    support is tracked as a follow-up to #4.
+    """
+    from rtl_buddy_axi_profiler.stages.gen_monitor.generator import (
+        GenMonitorError,
+        write_monitor,
     )
-    raise typer.Exit(code=2)
+
+    try:
+        write_monitor(
+            manifest,
+            output,
+            time_precision=time_precision,
+            buffer_cap=buffer_cap,
+        )
+    except GenMonitorError as e:
+        typer.echo(f"gen-monitor: {e}", err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(
+        f"wrote {output}. Bind from your testbench:\n"
+        f"  bind <design_top> axi_perf_mon u_axi_perf_mon "
+        f"(.clk(<clk>), .rst_n(<rst_n>));"
+    )
 
 
 @app.command("version")
