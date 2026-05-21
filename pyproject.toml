@@ -13,6 +13,7 @@ dependencies = [
     "typer>=0.25.1",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
+    "pywellen>=0.20.5",
 ]
 
 # Future runtime deps gated as optional extras so the default install
@@ -70,3 +71,10 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.12"
 files = ["src/rtl_buddy_axi_profiler"]
+
+# pywellen is the Rust-backed Wellen binding; it doesn't ship a
+# py.typed marker. Allow imports without stubs rather than vendor
+# a fake stubfile here.
+[[tool.mypy.overrides]]
+module = "pywellen"
+ignore_missing_imports = true
