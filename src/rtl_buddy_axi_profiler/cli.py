@@ -77,14 +77,23 @@ def discover_cmd(
         None, "--amend", help="Existing axi-bundles.yaml to merge user edits from."
     ),
 ) -> None:
-    """Run discovery only, emitting axi-bundles.yaml. NOT YET IMPLEMENTED (#2)."""
-    typer.echo(
-        f"discover is not yet implemented — see "
-        f"rtl-buddy-axi-profiler#2. Args: filelist={filelist} top={top} "
-        f"-o {output}" + (f" --amend {amend}" if amend else ""),
-        err=True,
-    )
-    raise typer.Exit(code=2)
+    """Run discovery, emitting axi-bundles.yaml.
+
+    v1: regex-driven port-prefix detection. The interface-modport
+    detector, hierarchy resolver, and amend pass are tracked as
+    follow-ups to #2.
+    """
+    if amend is not None:
+        typer.echo(
+            "--amend is not yet implemented (follow-up to #2). Re-running "
+            "without --amend overwrites the output.",
+            err=True,
+        )
+
+    from rtl_buddy_axi_profiler.stages.discover.verible import discover_to_yaml
+
+    manifest = discover_to_yaml(filelist=filelist, top=top, output=output)
+    typer.echo(f"Wrote {output} with {len(manifest.bundles)} bundle(s) for top={top}.")
 
 
 @app.command("gen-monitor")
