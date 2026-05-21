@@ -1,0 +1,109 @@
+"""Typer entry point for the `axi-profiler` CLI.
+
+Bootstrap only — stage selection flags are wired but no stage impls
+are loaded (those land in issues #2, #3, #4). `run` exits with a
+clear error pointing at the open phase issues until they ship.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+
+app = typer.Typer(
+    name="axi-profiler",
+    help=(
+        "AXI / APB / AHB interconnect performance profiler. "
+        "Five-stage pipeline: discover → ingest → reconstruct → aggregate → emit. "
+        "See https://github.com/rtl-buddy/rtl-buddy-axi-profiler for the schema spec."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+
+
+@app.command("run")
+def run(
+    filelist: Path = typer.Option(
+        ..., "--filelist", "-f", help="Path to RTL filelist for discovery."
+    ),
+    top: str = typer.Option(..., "--top", "-t", help="Top module name."),
+    input_path: Path = typer.Option(
+        ..., "--input", "-i", help="FST/VCD waveform or .axis binary stream."
+    ),
+    output: Path = typer.Option(
+        Path("axi-perf.json"),
+        "--output",
+        "-o",
+        help="Destination for the v1 axi-perf.json artifact.",
+    ),
+    manifest: Path | None = typer.Option(
+        None,
+        "--manifest",
+        "-m",
+        help="Pre-built axi-bundles.yaml; if absent the discover stage runs.",
+    ),
+    discover: str = typer.Option("verible", "--discover", help="Discover stage."),
+    ingest: str = typer.Option(
+        "fst", "--ingest", help="Ingest stage (fst | vcd | stream)."
+    ),
+    reconstruct: str = typer.Option("axi4", "--reconstruct", help="Reconstruct stage."),
+    aggregate: str = typer.Option("standard", "--aggregate", help="Aggregate stage."),
+    emit: str = typer.Option("json-v1", "--emit", help="Emit stage."),
+) -> None:
+    """Run the full pipeline end-to-end. NOT YET IMPLEMENTED."""
+    typer.echo(
+        f"axi-profiler run is not yet implemented. The bootstrap "
+        f"(rtl-buddy-axi-profiler#1) ships the skeleton, schemas, and "
+        f"stage Protocol contracts only. The pipeline stages land in:\n"
+        f"  #2 discover (verible)\n"
+        f"  #3 ingest (fst/vcd) + reconstruct + aggregate + emit\n"
+        f"  #4 ingest (stream) + gen-monitor\n"
+        f"Selected stages: {discover}/{ingest}/{reconstruct}/{aggregate}/{emit}\n"
+        f"Inputs: filelist={filelist} top={top} -i {input_path} -o {output}"
+        + (f" manifest={manifest}" if manifest else ""),
+        err=True,
+    )
+    raise typer.Exit(code=2)
+
+
+@app.command("discover")
+def discover_cmd(
+    filelist: Path = typer.Option(..., "--filelist", "-f"),
+    top: str = typer.Option(..., "--top", "-t"),
+    output: Path = typer.Option(Path("axi-bundles.yaml"), "--output", "-o"),
+    amend: Path | None = typer.Option(
+        None, "--amend", help="Existing axi-bundles.yaml to merge user edits from."
+    ),
+) -> None:
+    """Run discovery only, emitting axi-bundles.yaml. NOT YET IMPLEMENTED (#2)."""
+    typer.echo(
+        f"discover is not yet implemented — see "
+        f"rtl-buddy-axi-profiler#2. Args: filelist={filelist} top={top} "
+        f"-o {output}" + (f" --amend {amend}" if amend else ""),
+        err=True,
+    )
+    raise typer.Exit(code=2)
+
+
+@app.command("gen-monitor")
+def gen_monitor(
+    manifest: Path = typer.Argument(..., help="Input axi-bundles.yaml."),
+    output: Path = typer.Option(Path("axi_perf_mon.sv"), "--output", "-o"),
+) -> None:
+    """Generate the SV monitor for the stream ingest path. NOT YET IMPLEMENTED (#4)."""
+    typer.echo(
+        f"gen-monitor is not yet implemented — see "
+        f"rtl-buddy-axi-profiler#4. Args: manifest={manifest} -o {output}",
+        err=True,
+    )
+    raise typer.Exit(code=2)
+
+
+@app.command("version")
+def version() -> None:
+    """Print the installed package version."""
+    from importlib.metadata import version as _v
+
+    typer.echo(_v("rtl-buddy-axi-profiler"))

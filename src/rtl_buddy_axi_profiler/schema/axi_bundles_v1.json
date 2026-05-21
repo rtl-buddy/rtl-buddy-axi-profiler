@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rtl-buddy.github.io/rtl-buddy-axi-profiler/schema/axi_bundles_v1.json",
+  "title": "axi-bundles v1.0",
+  "description": "Manifest format produced by the discover stage and consumed by the ingest stages.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "design_top", "bundles"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "generated_by":   { "type": "string" },
+    "generated_at":   { "type": "string", "format": "date-time" },
+    "design_top":     { "type": "string" },
+    "bundles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bundle" }
+    }
+  },
+  "$defs": {
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "master_path",
+        "slave_path",
+        "protocol",
+        "data_width",
+        "id_width",
+        "source",
+        "signals"
+      ],
+      "properties": {
+        "name":         { "type": "string" },
+        "master_path":  { "type": "string" },
+        "slave_path":   { "type": "string" },
+        "protocol":     { "enum": ["AXI4", "AXI-Lite", "AXI5"] },
+        "data_width":   { "type": "integer", "minimum": 1 },
+        "id_width":     { "type": "integer", "minimum": 0 },
+        "source":       { "enum": ["verible-interface", "verible-regex", "user"] },
+        "default_view": { "enum": ["parent", "children", "both"] },
+        "signals": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "needs_user_input": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bundle" }
+        }
+      }
+    }
+  }
+}

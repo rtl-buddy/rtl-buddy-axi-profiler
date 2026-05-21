@@ -1,0 +1,70 @@
+[project]
+name = "rtl-buddy-axi-profiler"
+version = "0.1.0"
+description = "AXI / APB / AHB interconnect performance profiler; consumed by rtl-buddy-view's axi-perf overlay."
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [
+    { name = "Loh Zhi-Hern", email = "expsg-hern@users.noreply.github.com" }
+]
+dependencies = [
+    "typer>=0.25.1",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+]
+
+# Future runtime deps gated as optional extras so the default install
+# stays light. See AGENTS.md "Runtime dependencies" for the policy.
+#
+# [fst]:     used by stages/ingest/fst.py — see issue #3.
+#            Tentative pick (pyfst vs pylibfst) decided in #3 once we
+#            benchmark on the 1 GB fixture.
+# [verible]: used by stages/discover/verible.py — see issue #2.
+#            Profiler links libverible directly (no rtl_buddy dep);
+#            final binding name confirmed in #2.
+[project.optional-dependencies]
+fst = []
+verible = []
+
+[project.scripts]
+axi-profiler = "rtl_buddy_axi_profiler:main"
+
+[project.entry-points."rtl_buddy_axi_profiler.stages"]
+# Built-in stage registrations. Subsequent issues populate these as
+# their respective stages land; bootstrap ships the registry only.
+# See stages/protocol.py for the interface contracts.
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+lint = [
+    "mypy>=2.1.0",
+    "ruff>=0.11.0",
+]
+test = [
+    "pytest>=9.0.3",
+    "pytest-cov>=5.0",
+]
+dev = [
+    { include-group = "lint" },
+    { include-group = "test" },
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["F", "E7", "E9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/rtl_buddy_axi_profiler"]
