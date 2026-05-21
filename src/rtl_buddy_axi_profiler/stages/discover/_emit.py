@@ -48,6 +48,8 @@ def bundle_to_dict(bundle: Bundle) -> dict[str, Any]:
         out["default_view"] = bundle.default_view.value
     else:
         out["default_view"] = DefaultView.PARENT.value
+    if bundle.clock_signal:
+        out["clock_signal"] = bundle.clock_signal
     out["signals"] = dict(bundle.signals)
     needs = _needs_user_input(bundle)
     if needs:

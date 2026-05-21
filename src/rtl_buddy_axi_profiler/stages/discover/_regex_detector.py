@@ -24,6 +24,7 @@ from rtl_buddy_axi_profiler.types import (
     Protocol,
 )
 
+from rtl_buddy_axi_profiler.stages.discover._clock_pin import detect_clock_port
 from rtl_buddy_axi_profiler.stages.discover._summary import (
     DesignSummary,
     ModuleSummary,
@@ -248,6 +249,7 @@ def _emit_bundle_pair(
         else (f"{master_path.split('.')[-1]}_{master.prefix.rstrip('_')}")
     )
     signals = _signals_for_role_map(master, master_path)
+    clock = _detect_clock_signal(master, master_path)
     if matched is None:
         return [
             Bundle(
@@ -260,6 +262,7 @@ def _emit_bundle_pair(
                 source=BundleSource.VERIBLE_REGEX,
                 default_view=DefaultView.PARENT,
                 signals=signals,
+                clock_signal=clock,
             )
         ]
     slave, slave_path = matched
@@ -277,8 +280,17 @@ def _emit_bundle_pair(
             # stage extracts from the master's port; nets are shared
             # so the slave side is redundant. (See axi-bundles-schema.md.)
             signals=signals,
+            clock_signal=clock,
         )
     ]
+
+
+def _detect_clock_signal(master: _ModuleBundle, master_path: str) -> str:
+    """Resolve a bundle's clock-pin port to a fully qualified path."""
+    clock_port = detect_clock_port(master.module, prefix=master.prefix)
+    if clock_port is None:
+        return ""
+    return f"{master_path}.{clock_port}"
 
 
 def _signals_for_role_map(bundle: _ModuleBundle, inst_path: str) -> dict[str, str]:

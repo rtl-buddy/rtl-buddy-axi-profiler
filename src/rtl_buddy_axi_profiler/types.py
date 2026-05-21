@@ -51,6 +51,11 @@ class Bundle:
     source: BundleSource = BundleSource.USER
     default_view: DefaultView = DefaultView.PARENT
     signals: dict[str, str] = field(default_factory=dict)
+    # Fully qualified path to the bundle's clock signal. Each AXI
+    # interface carries its own clock; the ingest stage uses this
+    # signal's posedges to sample handshakes. Empty string means
+    # autodetect (legacy single-global-clock fallback).
+    clock_signal: str = ""
     children: tuple["Bundle", ...] = ()
 
 
