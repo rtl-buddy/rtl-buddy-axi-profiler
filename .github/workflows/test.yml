@@ -44,5 +44,21 @@ jobs:
       - name: Install test dependencies
         run: uv sync --group test --python ${{ matrix.python-version }}
 
+      # The verible-dependent tests (test_verible_wrapper.py end-to-end,
+      # and the discover stage tests once #2 lands) skip when the binary
+      # isn't reachable. Cache the vendored binary keyed on the pinned-
+      # version constant so we pay the download cost once per version
+      # bump, not once per CI run.
+      - name: Cache vendored Verible
+        id: cache-verible
+        uses: actions/cache@v4
+        with:
+          path: vendor/verible
+          key: verible-${{ runner.os }}-${{ hashFiles('src/rtl_buddy_axi_profiler/_verible_install.py') }}
+
+      - name: Fetch Verible (cache miss only)
+        if: steps.cache-verible.outputs.cache-hit != 'true'
+        run: uv run --python ${{ matrix.python-version }} python scripts/fetch_verible.py
+
       - name: Run pytest
         run: uv run --python ${{ matrix.python-version }} pytest -q
