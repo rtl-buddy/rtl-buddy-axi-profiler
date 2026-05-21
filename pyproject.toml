@@ -45,6 +45,7 @@ lint = [
     "mypy>=2.1.0",
     "ruff>=0.11.0",
     "types-PyYAML>=6.0",
+    "types-jsonschema>=4.0",
 ]
 test = [
     "pytest>=9.0.3",
