@@ -55,6 +55,14 @@ def run(
         "standard", "--aggregate", help="Aggregate stage."
     ),
     emit_stage: str = typer.Option("json-v1", "--emit", help="Emit stage."),
+    tb_prefix: str = typer.Option(
+        "",
+        "--tb-prefix",
+        help="Hierarchical prefix prepended to manifest signal paths "
+        "when looking them up in the trace. Typical: 'tb.dut'. Empty = "
+        "use manifest paths verbatim. rb axi-profile fills this from "
+        "rb.yaml's testbench top.",
+    ),
 ) -> None:
     """Run the full pipeline end-to-end.
 
@@ -111,7 +119,7 @@ def run(
         _ = parse_files  # imported to keep module hot; unused
         manifest_obj = VeribleDiscover().run(filelist=filelist, top=top)
 
-    ingest_stage = WellenIngest()
+    ingest_stage = WellenIngest(tb_prefix=tb_prefix)
     try:
         events = ingest_stage.run(input_path, manifest_obj)
         txns = _reconstruct(events)

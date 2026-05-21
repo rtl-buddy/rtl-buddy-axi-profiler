@@ -57,13 +57,21 @@ class VcdWriter:
         out: list[str] = []
         out.append(f"$timescale {self._timescale} $end")
 
-        # Build the scope tree.
-        scopes: dict[str, list[str]] = {}
+        # Vars keyed by the scope they sit in.
+        vars_by_scope: dict[str, list[str]] = {}
         for path, scope in self._scope_for.items():
-            scopes.setdefault(scope, []).append(path)
+            vars_by_scope.setdefault(scope, []).append(path)
 
-        # Emit scopes nested from the root down.
-        rendered_scopes = set()
+        # Build the full set of scopes (including every intermediate
+        # parent) so deeply-nested vars get their containing scopes
+        # emitted in order.
+        all_scopes: set[str] = set()
+        for scope in vars_by_scope:
+            parts = scope.split(".")
+            for i in range(1, len(parts) + 1):
+                all_scopes.add(".".join(parts[:i]))
+
+        rendered_scopes: set[str] = set()
 
         def emit_scope(scope: str) -> None:
             if scope in rendered_scopes:
@@ -71,25 +79,22 @@ class VcdWriter:
             rendered_scopes.add(scope)
             name = scope.split(".")[-1] if scope else "top"
             out.append(f"$scope module {name} $end")
-            # Recurse into child scopes.
             children = sorted(
                 s
-                for s in scopes
+                for s in all_scopes
                 if s.startswith(scope + ".")
                 and s != scope
                 and "." not in s[len(scope) + 1 :]
             )
             for child in children:
                 emit_scope(child)
-            # Emit vars in this scope.
-            for path in sorted(scopes.get(scope, [])):
+            for path in sorted(vars_by_scope.get(scope, [])):
                 sig = self._signals[path]
                 kind = "wire"
                 out.append(f"$var {kind} {sig.width} {sig.code} {sig.name} $end")
             out.append("$upscope $end")
 
-        # Find root scopes (those with no parent or with parent ""):
-        roots = sorted({s.split(".")[0] for s in self._scope_for.values()})
+        roots = sorted({s.split(".")[0] for s in all_scopes})
         for root in roots:
             emit_scope(root)
         out.append("$enddefinitions $end")

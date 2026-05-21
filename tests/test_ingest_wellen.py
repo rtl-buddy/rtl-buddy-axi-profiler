@@ -352,6 +352,104 @@ def test_wellen_ingest_uses_per_bundle_clock_when_manifest_sets_it(
     assert len(ar) == 1
 
 
+def test_wellen_ingest_strips_tb_prefix_when_set(tmp_path: Path) -> None:
+    """A trace wrapped under 'tb.dut.<design>' is resolvable when
+    --tb-prefix='tb.dut' is set, even though the manifest paths are
+    design-relative."""
+    # Build a wrapper VCD that nests the original 'top' scope under
+    # 'tb.dut.top'. We exercise this by re-using the minimal VCD's
+    # signal declarations but writing under the wrapped scope.
+    from tests._vcd_helpers import VcdWriter
+
+    w = VcdWriter(timescale="1ns")
+    w.declare("tb.dut.top.clk", 1)
+    for role, width in [
+        ("arvalid", 1),
+        ("arready", 1),
+        ("araddr", 32),
+        ("arid", 4),
+        ("arlen", 8),
+        ("arsize", 3),
+        ("awvalid", 1),
+        ("awready", 1),
+        ("awaddr", 32),
+        ("awid", 4),
+        ("awlen", 8),
+        ("awsize", 3),
+        ("rvalid", 1),
+        ("rready", 1),
+        ("rid", 4),
+        ("rresp", 2),
+        ("rlast", 1),
+        ("wvalid", 1),
+        ("wready", 1),
+        ("wlast", 1),
+        ("bvalid", 1),
+        ("bready", 1),
+        ("bid", 4),
+        ("bresp", 2),
+    ]:
+        w.declare(f"tb.dut.top.u_cpu.m_axi_{role}", width)
+    for i in range(11):
+        w.change(i * 10, "tb.dut.top.clk", i % 2)
+    w.change(0, "tb.dut.top.u_cpu.m_axi_arvalid", 0)
+    w.change(0, "tb.dut.top.u_cpu.m_axi_arready", 0)
+    w.change(0, "tb.dut.top.u_cpu.m_axi_arid", 0)
+    w.change(0, "tb.dut.top.u_cpu.m_axi_araddr", 0)
+    w.change(20, "tb.dut.top.u_cpu.m_axi_arvalid", 1)
+    w.change(20, "tb.dut.top.u_cpu.m_axi_arready", 1)
+    w.change(20, "tb.dut.top.u_cpu.m_axi_araddr", 0x200)
+    w.change(20, "tb.dut.top.u_cpu.m_axi_arid", 1)
+    vcd = tmp_path / "wrapped.vcd"
+    vcd.write_text(w.render())
+
+    # Manifest with design-relative paths.
+    bundle = Bundle(
+        name="cpu_to_dram",
+        master_path="top.u_cpu",
+        slave_path="top.u_dram",
+        protocol=Protocol.AXI4,
+        data_width=64,
+        id_width=4,
+        source=BundleSource.VERIBLE_REGEX,
+        default_view=DefaultView.PARENT,
+        signals={
+            role: f"top.u_cpu.m_axi_{role}"
+            for role in (
+                "arvalid",
+                "arready",
+                "araddr",
+                "arid",
+                "arlen",
+                "arsize",
+                "awvalid",
+                "awready",
+                "rvalid",
+                "rready",
+                "wvalid",
+                "wready",
+                "bvalid",
+                "bready",
+            )
+        },
+        clock_signal="top.clk",
+    )
+    manifest = Manifest(
+        schema_version="1.0",
+        design_top="top",
+        bundles=(bundle,),
+    )
+
+    # Without tb_prefix: lookup fails.
+    with pytest.raises(WellenIngestError):
+        list(WellenIngest().run(vcd, manifest))
+
+    # With tb_prefix: lookup succeeds, AR event observed.
+    events = list(WellenIngest(tb_prefix="tb.dut").run(vcd, manifest))
+    ar = [e for e in events if e.channel == Channel.AR]
+    assert len(ar) >= 1
+
+
 def test_wellen_ingest_errors_when_manifest_clock_signal_missing(
     tmp_path: Path,
 ) -> None:
