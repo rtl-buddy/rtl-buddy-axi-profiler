@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rtl-buddy.github.io/rtl-buddy-axi-profiler/schema/axi_perf_v1.json",
+  "title": "axi-perf v1.0",
+  "description": "Consumer-facing JSON emitted by rtl-buddy-axi-profiler; consumed by rtl-buddy-view's axi-perf overlay.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool",
+    "tool_version",
+    "produced_at",
+    "design_top",
+    "duration_cycles",
+    "clock_period_ns",
+    "bundles",
+    "interconnects"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "tool": { "type": "string" },
+    "tool_version": { "type": "string" },
+    "produced_at": { "type": "string", "format": "date-time" },
+    "design_top": { "type": "string" },
+    "duration_cycles": { "type": "integer", "minimum": 0 },
+    "clock_period_ns": { "type": "number", "exclusiveMinimum": 0 },
+    "bundles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bundle" }
+    },
+    "interconnects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/interconnect" }
+    }
+  },
+  "$defs": {
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "master_path",
+        "slave_path",
+        "protocol",
+        "data_width",
+        "id_width",
+        "channels",
+        "throughput",
+        "outstanding",
+        "latency_cycles",
+        "errors"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "master_path": { "type": "string" },
+        "slave_path": { "type": "string" },
+        "protocol": { "enum": ["AXI4", "AXI-Lite", "AXI5"] },
+        "data_width": { "type": "integer", "minimum": 1 },
+        "id_width": { "type": "integer", "minimum": 0 },
+        "default_view": { "enum": ["parent", "children", "both"] },
+        "channels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ar", "aw", "r", "w", "b"],
+          "properties": {
+            "ar": { "$ref": "#/$defs/channel_request" },
+            "aw": { "$ref": "#/$defs/channel_request" },
+            "r":  { "$ref": "#/$defs/channel_data" },
+            "w":  { "$ref": "#/$defs/channel_data" },
+            "b":  { "$ref": "#/$defs/channel_request" }
+          }
+        },
+        "throughput": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["read_bps", "write_bps"],
+          "properties": {
+            "read_bps":  { "type": "number", "minimum": 0 },
+            "write_bps": { "type": "number", "minimum": 0 }
+          }
+        },
+        "outstanding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["read_peak", "read_avg", "write_peak", "write_avg"],
+          "properties": {
+            "read_peak":  { "type": "integer", "minimum": 0 },
+            "read_avg":   { "type": "number",  "minimum": 0 },
+            "write_peak": { "type": "integer", "minimum": 0 },
+            "write_avg":  { "type": "number",  "minimum": 0 }
+          }
+        },
+        "latency_cycles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ar_to_r_first", "aw_to_b"],
+          "properties": {
+            "ar_to_r_first": { "$ref": "#/$defs/latency" },
+            "aw_to_b":       { "$ref": "#/$defs/latency" }
+          }
+        },
+        "errors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slverr", "decerr"],
+          "properties": {
+            "slverr": { "type": "integer", "minimum": 0 },
+            "decerr": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bundle" }
+        }
+      }
+    },
+    "channel_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["util_pct", "bp_pct", "peak_occ", "txns"],
+      "properties": {
+        "util_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "bp_pct":   { "type": "number", "minimum": 0, "maximum": 100 },
+        "peak_occ": { "type": "integer", "minimum": 0 },
+        "txns":     { "type": "integer", "minimum": 0 }
+      }
+    },
+    "channel_data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["util_pct", "bp_pct", "peak_occ", "beats"],
+      "properties": {
+        "util_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "bp_pct":   { "type": "number", "minimum": 0, "maximum": 100 },
+        "peak_occ": { "type": "integer", "minimum": 0 },
+        "beats":    { "type": "integer", "minimum": 0 }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["p50", "p95", "p99", "max", "hist_log2"],
+      "properties": {
+        "p50":       { "type": "integer", "minimum": 0 },
+        "p95":       { "type": "integer", "minimum": 0 },
+        "p99":       { "type": "integer", "minimum": 0 },
+        "max":       { "type": "integer", "minimum": 0 },
+        "hist_log2": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 16,
+          "maxItems": 16
+        }
+      }
+    },
+    "interconnect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_path",
+        "total_read_bps",
+        "total_write_bps",
+        "hottest_master",
+        "hottest_slave",
+        "arbitration"
+      ],
+      "properties": {
+        "node_path":        { "type": "string" },
+        "total_read_bps":   { "type": "number", "minimum": 0 },
+        "total_write_bps":  { "type": "number", "minimum": 0 },
+        "hottest_master":   { "type": "string" },
+        "hottest_slave":    { "type": "string" },
+        "arbitration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fairness_jain", "starved_masters"],
+          "properties": {
+            "fairness_jain":   { "type": "number", "minimum": 0, "maximum": 1 },
+            "starved_masters": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
