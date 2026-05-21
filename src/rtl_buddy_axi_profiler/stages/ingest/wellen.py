@@ -25,8 +25,10 @@ from typing import Iterator
 import pywellen
 
 from rtl_buddy_axi_profiler.stages.ingest._clock_detect import (
+    ClockDetectError,
     DetectedClock,
     detect_global_clock,
+    resolve_bundle_clock,
 )
 from rtl_buddy_axi_profiler.types import (
     Bundle,
@@ -81,27 +83,68 @@ def ingest(source: Path, manifest: Manifest) -> Iterator[HandshakeEvent]:
     except Exception as e:
         raise WellenIngestError(f"could not open trace {source}: {e}") from None
 
-    clock = detect_global_clock(waveform)
     bundles = _resolve_bundles(waveform, _flat_bundles(manifest.bundles))
-    yield from _emit_events(waveform, clock, bundles)
+    bundle_clocks = _resolve_bundle_clocks(waveform, bundles)
+    yield from _emit_events(waveform, bundle_clocks)
+
+
+def _resolve_bundle_clocks(
+    waveform: pywellen.Waveform, bundles: list[_BundleSignals]
+) -> list[tuple[_BundleSignals, DetectedClock]]:
+    """Pair each bundle with its clock.
+
+    Per-bundle clock from the manifest's ``clock_signal`` wins;
+    falls back to the global autodetected clock for bundles whose
+    manifest entry doesn't set one (legacy v1.0 manifests).
+    """
+    global_clock: DetectedClock | None = None
+    out: list[tuple[_BundleSignals, DetectedClock]] = []
+    for bs in bundles:
+        path = bs.bundle.clock_signal
+        if path:
+            try:
+                clock = resolve_bundle_clock(waveform, path)
+            except ClockDetectError as e:
+                raise WellenIngestError(f"bundle {bs.bundle.name!r}: {e}") from None
+        else:
+            # Legacy fallback: single global autodetect, cached on
+            # first miss.
+            if global_clock is None:
+                global_clock = detect_global_clock(waveform)
+            clock = global_clock
+        out.append((bs, clock))
+    return out
 
 
 def _emit_events(
     waveform: pywellen.Waveform,
-    clock: DetectedClock,
-    bundles: list[_BundleSignals],
+    bundle_clocks: list[tuple[_BundleSignals, DetectedClock]],
 ) -> Iterator[HandshakeEvent]:
-    """Walk clock posedges and emit one HandshakeEvent per active
-    (channel, bundle) at each posedge."""
+    """Walk each bundle's clock posedges independently; emit a
+    HandshakeEvent on any channel where valid && ready holds.
+
+    Per-bundle iteration lets multi-clock-domain fabrics work
+    correctly — different bundles can use different clocks.
+    Events from different bundles interleave in posedge order;
+    the downstream reconstruct stage tolerates any interleaving.
+    """
     timescale = waveform.hierarchy.timescale()
     from rtl_buddy_axi_profiler.stages.ingest._clock_detect import _tick_to_fs
 
     tick_fs = _tick_to_fs(timescale.factor, timescale.unit)
 
-    for tick in clock.posedge_times:
+    # Build a sorted (tick, bundle_index) event list across all
+    # bundle clocks so the output stream is monotonic in t_fs.
+    events: list[tuple[int, int]] = []
+    for idx, (_bs, clock) in enumerate(bundle_clocks):
+        for tick in clock.posedge_times:
+            events.append((tick, idx))
+    events.sort(key=lambda x: x[0])
+
+    for tick, idx in events:
+        bs = bundle_clocks[idx][0]
         t_fs = tick * tick_fs
-        for bs in bundles:
-            yield from _sample_bundle(bs, tick, t_fs)
+        yield from _sample_bundle(bs, tick, t_fs)
 
 
 def _sample_bundle(
@@ -262,18 +305,42 @@ class WellenIngest:
 
     def __init__(self) -> None:
         self._detected_clock: DetectedClock | None = None
+        self._bundle_clocks: list[tuple[str, DetectedClock]] = []
 
     @property
     def detected_clock(self) -> DetectedClock | None:
-        """Set after the first :meth:`run` so the CLI can read clock
-        metadata for downstream stages."""
+        """The single representative clock used by the CLI to plumb
+        duration_cycles / clock_period_ns into the aggregate stage.
+
+        With per-bundle clocks the CLI picks the *fastest* clock so
+        ``duration_cycles`` is the worst-case cycle count. Improved
+        per-bundle metadata propagation is a follow-up if/when the
+        aggregate stage grows multi-clock awareness.
+        """
         return self._detected_clock
+
+    @property
+    def bundle_clocks(self) -> list[tuple[str, DetectedClock]]:
+        """``[(bundle_name, DetectedClock), ...]`` — each bundle's
+        resolved clock after the first :meth:`run`."""
+        return self._bundle_clocks
 
     def run(self, source: Path, manifest: Manifest) -> Iterator[HandshakeEvent]:
         try:
             waveform = pywellen.Waveform(str(source))
         except Exception as e:
             raise WellenIngestError(f"could not open trace {source}: {e}") from None
-        self._detected_clock = detect_global_clock(waveform)
         bundles = _resolve_bundles(waveform, _flat_bundles(manifest.bundles))
-        return _emit_events(waveform, self._detected_clock, bundles)
+        bundle_clocks = _resolve_bundle_clocks(waveform, bundles)
+        self._bundle_clocks = [(bs.bundle.name, clock) for bs, clock in bundle_clocks]
+        if bundle_clocks:
+            # Pick the clock with the most posedges as the representative —
+            # i.e. the fastest clock observed across all bundles. The CLI
+            # uses this for duration_cycles when threading to aggregate.
+            self._detected_clock = max(
+                (clock for _, clock in bundle_clocks),
+                key=lambda c: len(c.posedge_times),
+            )
+        else:
+            self._detected_clock = None
+        return _emit_events(waveform, bundle_clocks)

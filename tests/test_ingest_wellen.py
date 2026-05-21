@@ -318,6 +318,68 @@ def test_wellen_ingest_class_exposes_detected_clock(tmp_path: Path) -> None:
     assert len(events) >= 2  # AR + R at minimum
 
 
+def test_wellen_ingest_uses_per_bundle_clock_when_manifest_sets_it(
+    tmp_path: Path,
+) -> None:
+    """When a bundle's clock_signal is set, ingest uses exactly that
+    signal (no global autodetect)."""
+    vcd = _build_minimal_vcd(tmp_path)
+    bundle = Bundle(
+        name="cpu_to_dram",
+        master_path=MASTER,
+        slave_path=SLAVE,
+        protocol=Protocol.AXI4,
+        data_width=64,
+        id_width=4,
+        source=BundleSource.VERIBLE_REGEX,
+        default_view=DefaultView.PARENT,
+        signals=_make_signals(MASTER),
+        clock_signal="top.clk",
+    )
+    manifest = Manifest(
+        schema_version="1.0",
+        design_top="top",
+        bundles=(bundle,),
+        generated_by="test",
+        generated_at="2026-05-21T08:00:00Z",
+    )
+    stage = WellenIngest()
+    events = list(stage.run(vcd, manifest))
+    assert stage.bundle_clocks == [("cpu_to_dram", stage.detected_clock)]
+    assert stage.bundle_clocks[0][1].full_name == "top.clk"
+    # AR + R still extracted as before.
+    ar = [e for e in events if e.channel == Channel.AR]
+    assert len(ar) == 1
+
+
+def test_wellen_ingest_errors_when_manifest_clock_signal_missing(
+    tmp_path: Path,
+) -> None:
+    """If the manifest names a clock that's absent from the trace,
+    we want a clean WellenIngestError before sampling, not a quiet
+    misread."""
+    vcd = _build_minimal_vcd(tmp_path)
+    bundle = Bundle(
+        name="cpu_to_dram",
+        master_path=MASTER,
+        slave_path=SLAVE,
+        protocol=Protocol.AXI4,
+        data_width=64,
+        id_width=4,
+        source=BundleSource.VERIBLE_REGEX,
+        default_view=DefaultView.PARENT,
+        signals=_make_signals(MASTER),
+        clock_signal="top.does_not_exist",
+    )
+    manifest = Manifest(
+        schema_version="1.0",
+        design_top="top",
+        bundles=(bundle,),
+    )
+    with pytest.raises(WellenIngestError):
+        list(WellenIngest().run(vcd, manifest))
+
+
 # --- end-to-end -------------------------------------------------------------
 
 

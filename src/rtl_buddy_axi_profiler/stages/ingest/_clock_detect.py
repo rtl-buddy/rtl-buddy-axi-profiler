@@ -1,13 +1,19 @@
-"""Clock detection from a waveform.
+"""Clock detection / resolution from a waveform.
 
-The discover stage's manifest doesn't carry a clock identity — the
-clock signal is present in the trace, so the ingest stage finds it
-heuristically: the signal with the most clean 0↔1 toggles (and ~50%
-duty cycle) is the clock. Multi-clock-domain support is deferred to
-a follow-up.
+Two paths:
 
-The detected clock's period (in fs) becomes the cycle-count basis
-for all downstream latency / throughput math.
+1. **Per-bundle (preferred)** — :func:`resolve_bundle_clock` reads
+   the manifest's ``Bundle.clock_signal`` and walks that exact
+   signal's posedges. Each AXI interface carries its own clock pin
+   so multi-clock fabrics work correctly.
+
+2. **Global fallback** — :func:`detect_global_clock` finds the
+   highest-frequency 1-bit toggling signal in the trace. Kept for
+   producers that ship manifests without ``clock_signal`` set
+   (legacy v1.0 manifests, hand-written stubs).
+
+The clock's period (in fs) becomes the cycle-count basis for all
+downstream latency / throughput math.
 """
 
 from __future__ import annotations
@@ -72,6 +78,43 @@ def detect_global_clock(waveform: pywellen.Waveform) -> DetectedClock:
     period_ticks = posedges[1] - posedges[0]
     return DetectedClock(
         full_name=name,
+        period_fs=period_ticks * tick_fs,
+        posedge_times=posedges,
+    )
+
+
+def resolve_bundle_clock(
+    waveform: pywellen.Waveform, clock_signal_path: str
+) -> DetectedClock:
+    """Look up a specific clock signal by its trace path.
+
+    Used when ``Bundle.clock_signal`` is set (the manifest names the
+    bundle's clock explicitly). Raises :class:`ClockDetectError`
+    if the signal isn't in the trace, isn't 1-bit, or has fewer
+    than two posedges.
+    """
+    timescale = waveform.hierarchy.timescale()
+    if timescale is None:
+        raise ClockDetectError("trace has no timescale; cannot derive a clock period.")
+    tick_fs = _tick_to_fs(timescale.factor, timescale.unit)
+
+    try:
+        sig = waveform.get_signal_from_path(clock_signal_path)
+    except Exception:
+        raise ClockDetectError(
+            f"clock signal {clock_signal_path!r} not found in trace; "
+            f"check the bundle's clock_signal against the trace's hierarchy."
+        ) from None
+
+    posedges = _posedge_times(sig)
+    if len(posedges) < 2:
+        raise ClockDetectError(
+            f"clock signal {clock_signal_path!r} has fewer than two posedges; "
+            f"cannot derive a period."
+        )
+    period_ticks = posedges[1] - posedges[0]
+    return DetectedClock(
+        full_name=clock_signal_path,
         period_fs=period_ticks * tick_fs,
         posedge_times=posedges,
     )
