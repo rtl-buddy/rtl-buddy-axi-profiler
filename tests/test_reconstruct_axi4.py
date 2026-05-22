@@ -87,9 +87,42 @@ def test_single_read_burst_of_one_beat() -> None:
     assert txn.is_read is True
     assert txn.txn_id == 1
     assert txn.addr == 0x100
+    # AR carries AxLEN=0 (default) → Transaction.len_beats = 1 actual beat.
+    assert txn.len_beats == 1
     assert txn.t_start_fs == 10
     assert txn.t_first_data_fs == 30
     assert txn.t_end_fs == 30
+
+
+def test_transaction_len_beats_equals_axlen_plus_one() -> None:
+    """Regression for #23: HandshakeEvent.len_beats is the raw AxLEN
+    field; Transaction.len_beats must be the actual beat count, i.e.
+    AxLEN + 1. Lock both the read and write conversion sites."""
+    read_events = [
+        _ar(t=10, txn_id=1, len_beats=3),  # 4-beat read burst
+        _r(t=20, txn_id=1, last=False),
+        _r(t=21, txn_id=1, last=False),
+        _r(t=22, txn_id=1, last=False),
+        _r(t=23, txn_id=1, last=True),
+    ]
+    write_events = [
+        _aw(t=5, txn_id=2, len_beats=7),  # 8-beat write burst
+        _w(t=6, last=False),
+        _w(t=7, last=False),
+        _w(t=8, last=False),
+        _w(t=9, last=False),
+        _w(t=10, last=False),
+        _w(t=11, last=False),
+        _w(t=12, last=False),
+        _w(t=13, last=True),
+        _b(t=20, txn_id=2),
+    ]
+    txns = list(reconstruct(iter(read_events + write_events)))
+    by_id = {t.txn_id: t for t in txns}
+    assert by_id[1].is_read is True
+    assert by_id[1].len_beats == 4  # raw AxLEN 3 + 1
+    assert by_id[2].is_read is False
+    assert by_id[2].len_beats == 8  # raw AxLEN 7 + 1
 
 
 def test_read_multi_beat_completes_on_rlast() -> None:

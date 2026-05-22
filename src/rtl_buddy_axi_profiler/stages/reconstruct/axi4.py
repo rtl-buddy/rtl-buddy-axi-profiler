@@ -138,7 +138,11 @@ def _read_to_transaction(
         is_read=True,
         txn_id=p.txn_id,
         addr=p.addr,
-        len_beats=p.len_beats,
+        # AxLEN encodes "burst length minus 1"; Transaction.len_beats
+        # is documented as actual beat count, so convert here. The
+        # in-flight _PendingRead keeps the raw AxLEN value the AR
+        # event delivered.
+        len_beats=p.len_beats + 1,
         size_log2=p.size_log2,
         t_start_fs=p.t_ar_fs,
         t_first_data_fs=p.t_first_data_fs,
@@ -155,7 +159,8 @@ def _write_to_transaction(
         is_read=False,
         txn_id=p.txn_id,
         addr=p.addr,
-        len_beats=p.len_beats,
+        # See _read_to_transaction: raw AxLEN → actual beats.
+        len_beats=p.len_beats + 1,
         size_log2=p.size_log2,
         t_start_fs=p.t_aw_fs,
         t_first_data_fs=p.t_aw_fs,

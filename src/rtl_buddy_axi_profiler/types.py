@@ -75,6 +75,11 @@ class HandshakeEvent:
     """A single (valid && ready) crossing on a channel.
 
     Time is expressed in femtoseconds for parity with FST/VCD readers.
+
+    ``len_beats`` here is the **raw AxLEN field** sampled off the bus
+    (0..255). AXI4 encoding: actual burst length = AxLEN + 1. The
+    reconstruct stage converts to actual beat count when building
+    :class:`Transaction`.
     """
 
     t_fs: int
@@ -94,6 +99,11 @@ class Transaction:
 
     Read txns are completed when RLAST arrives with the matching ID;
     write txns are completed when B arrives with the matching ID.
+
+    ``len_beats`` is the **actual beat count** (1..256), not the raw
+    AxLEN field — i.e. ``AxLEN + 1``. Downstream consumers
+    (aggregator, parquet emit, notebook plots) all assume the beat-
+    count convention.
     """
 
     bundle_name: str
