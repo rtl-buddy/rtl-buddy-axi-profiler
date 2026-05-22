@@ -42,7 +42,10 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install test dependencies
-        run: uv sync --group test --python ${{ matrix.python-version }}
+        # --extra parquet pulls pyarrow so the txns_parquet_v1 round-
+        # trip tests run instead of skipping. The extra stays optional
+        # for end users; only CI + dev installs pull it in.
+        run: uv sync --group test --extra parquet --python ${{ matrix.python-version }}
 
       # The verible-dependent tests (test_verible_wrapper.py end-to-end,
       # and the discover stage tests once #2 lands) skip when the binary

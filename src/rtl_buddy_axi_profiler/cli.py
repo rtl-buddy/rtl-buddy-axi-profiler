@@ -55,6 +55,14 @@ def run(
         "standard", "--aggregate", help="Aggregate stage."
     ),
     emit_stage: str = typer.Option("json-v1", "--emit", help="Emit stage."),
+    emit_txns_parquet: Path | None = typer.Option(
+        None,
+        "--emit-txns-parquet",
+        help="Also emit a per-transaction parquet file. Path is optional; "
+        "default is `axi-txns.parquet` next to --output. Requires the "
+        "[parquet] extra (pyarrow). Consumed by the marimo notebook "
+        "drill-down (umbrella #16).",
+    ),
     tb_prefix: str = typer.Option(
         "",
         "--tb-prefix",
@@ -119,17 +127,63 @@ def run(
         _ = parse_files  # imported to keep module hot; unused
         manifest_obj = VeribleDiscover().run(filelist=filelist, top=top)
 
+    from typing import Iterator as _Iterator
+
+    from rtl_buddy_axi_profiler.types import Transaction as _Transaction
+
     ingest_stage = WellenIngest(tb_prefix=tb_prefix)
+    parquet_target: Path | None = None
+    txns_list: list[_Transaction] = []
     try:
         events = ingest_stage.run(input_path, manifest_obj)
-        txns = _reconstruct(events)
+        txns_iter = _reconstruct(events)
         clock = ingest_stage.detected_clock
         cycles = len(clock.posedge_times) if clock else 0
         period_ns = (clock.period_fs / 1e6) if clock else 1.0
+
+        # Parquet emit needs the per-row transaction stream; aggregate
+        # also consumes it. Materialize once so both can read.
+        txns_for_aggregate: _Iterator[_Transaction]
+        if emit_txns_parquet is not None:
+            txns_list = list(txns_iter)
+            txns_for_aggregate = iter(txns_list)
+            # Bare "--emit-txns-parquet" (no path) lands as Path(".")
+            # via typer's flag-without-value behaviour → sibling of --output.
+            parquet_target = (
+                emit_txns_parquet
+                if str(emit_txns_parquet) not in (".", "")
+                else output.parent / "axi-txns.parquet"
+            )
+        else:
+            txns_for_aggregate = txns_iter
+
         stats = _aggregate(
-            txns, manifest_obj, duration_cycles=cycles, clock_period_ns=period_ns
+            txns_for_aggregate,
+            manifest_obj,
+            duration_cycles=cycles,
+            clock_period_ns=period_ns,
         )
         _emit(stats, manifest_obj, output)
+
+        if parquet_target is not None:
+            from rtl_buddy_axi_profiler.stages.emit.txns_parquet_v1 import (
+                TxnsParquetError,
+                emit_txns_parquet as _emit_parquet,
+            )
+
+            try:
+                _emit_parquet(
+                    txns_list,
+                    manifest_obj,
+                    parquet_target,
+                    clock_period_ns=period_ns,
+                )
+            except TxnsParquetError as e:
+                typer.echo(str(e), err=True)
+                raise typer.Exit(code=2) from None
+            typer.echo(
+                f"wrote {parquet_target} ({len(txns_list)} txns).", err=True
+            )
     except WellenIngestError as e:
         typer.echo(f"ingest failed: {e}", err=True)
         raise typer.Exit(code=1) from None

@@ -26,9 +26,13 @@ dependencies = [
 # [verible]: used by stages/discover/verible.py — see issue #2.
 #            Profiler links libverible directly (no rtl_buddy dep);
 #            final binding name confirmed in #2.
+# [parquet]: used by stages/emit/txns_parquet_v1.py — see issue #17.
+#            Drives the per-transaction parquet artifact that the
+#            marimo notebook drill-down (umbrella #16) consumes.
 [project.optional-dependencies]
 fst = []
 verible = []
+parquet = ["pyarrow>=14"]
 
 [project.scripts]
 axi-profiler = "rtl_buddy_axi_profiler:main"
