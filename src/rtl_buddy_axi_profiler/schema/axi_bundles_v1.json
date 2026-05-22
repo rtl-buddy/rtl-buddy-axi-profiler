@@ -39,6 +39,10 @@
         "id_width":     { "type": "integer", "minimum": 0 },
         "source":       { "enum": ["verible-interface", "verible-regex", "user"] },
         "default_view": { "enum": ["parent", "children", "both"] },
+        "clock_signal": {
+          "type": "string",
+          "description": "Fully qualified path to the bundle's clock signal. Each AXI interface has its own clock; the ingest stage samples handshakes on this signal's posedges."
+        },
         "signals": {
           "type": "object",
           "additionalProperties": { "type": "string" }

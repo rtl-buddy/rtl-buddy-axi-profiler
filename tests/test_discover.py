@@ -95,6 +95,15 @@ def test_discover_writes_schema_valid_yaml(tmp_path: Path) -> None:
     assert len(payload["bundles"]) == 1
 
 
+def test_discover_populates_clock_signal_from_master_port(tmp_path: Path) -> None:
+    """The single_pair fixture's cpu has a ``clk`` input; discovery
+    should resolve it to the master's clock_signal path."""
+    fixture = FIXTURES / "single_pair"
+    manifest = VeribleDiscover().run(filelist=fixture / "filelist.f", top="soc_top")
+    bundle = manifest.bundles[0]
+    assert bundle.clock_signal == "soc_top.u_cpu.clk"
+
+
 def test_unpaired_master_marks_needs_user_input(tmp_path: Path) -> None:
     """A module that has master AXI ports but no peer slave under the
     same parent should still emit a bundle, but flag ``slave_path``
