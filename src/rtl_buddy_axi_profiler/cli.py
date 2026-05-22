@@ -72,7 +72,6 @@ def run(
     """
     from rtl_buddy_axi_profiler.stages.aggregate.standard import aggregate as _aggregate
     from rtl_buddy_axi_profiler.stages.discover.verible import (
-        VeribleDiscover,
         discover_to_yaml,
     )
     from rtl_buddy_axi_profiler.stages.emit.json_v1 import emit as _emit
@@ -114,10 +113,20 @@ def run(
             err=True,
         )
     else:
-        from rtl_buddy_axi_profiler.stages.discover._sv_parser import parse_files
+        from rtl_buddy_axi_profiler.stages.discover._load import (
+            ManifestLoadError,
+            load_manifest,
+        )
 
-        _ = parse_files  # imported to keep module hot; unused
-        manifest_obj = VeribleDiscover().run(filelist=filelist, top=top)
+        try:
+            manifest_obj = load_manifest(manifest)
+        except ManifestLoadError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(code=2) from None
+        typer.echo(
+            f"loaded {manifest} ({len(manifest_obj.bundles)} bundle(s)).",
+            err=True,
+        )
 
     ingest_stage = WellenIngest(tb_prefix=tb_prefix)
     try:
