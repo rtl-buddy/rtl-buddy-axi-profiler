@@ -70,6 +70,51 @@ def _filter_bundle(df: Any, bundle: str | None, pl: Any) -> Any:
     return df.filter(pl.col("bundle_name") == bundle)
 
 
+def _pick_time_unit(span_ps: float) -> tuple[float, str]:
+    """Choose a display divisor + axis label for a ps-based timestamp span.
+
+    The parquet schema stores timestamps in picoseconds (good for sub-ns
+    sim clocks), but a 100 μs sim's tick labels would be eight-digit
+    numbers if we plotted ps directly. Switch units at each 1000× boundary
+    so the visible numbers stay 1–3 digits before the decimal.
+
+      span <    1 ns → ps
+      span <    1 μs → ns
+      span <    1 ms → μs
+      else           → ms
+
+    ``span_ps`` of 0 falls through to ps (empty / single-row dataframes
+    have nothing meaningful to scale anyway).
+    """
+    if span_ps >= 1e9:
+        return 1e9, "t (ms)"
+    if span_ps >= 1e6:
+        return 1e6, "t (μs)"
+    if span_ps >= 1e3:
+        return 1e3, "t (ns)"
+    return 1.0, "t (ps)"
+
+
+def _time_span_ps(df: Any, pl: Any, *col_names: str) -> float:
+    """Best-effort span across one or more time columns. Returns 0 when
+    every column is empty (no rows) so callers fall back to ps."""
+    lo: float | None = None
+    hi: float | None = None
+    for col in col_names:
+        if col not in df.columns:
+            continue
+        s = df[col].drop_nulls()
+        if s.is_empty():
+            continue
+        c_lo = s.min()
+        c_hi = s.max()
+        lo = c_lo if lo is None else min(lo, c_lo)
+        hi = c_hi if hi is None else max(hi, c_hi)
+    if lo is None or hi is None:
+        return 0.0
+    return float(hi - lo)
+
+
 def timeline(df: Any, *, bundle: str | None = None) -> Any:
     """Per-bundle handshakes over time, one tick per transaction.
 
@@ -87,12 +132,14 @@ def timeline(df: Any, *, bundle: str | None = None) -> Any:
         stride = max(1, df.height // DOWNSAMPLE_THRESHOLD)
         df = df.gather_every(stride)
 
+    divisor, label = _pick_time_unit(_time_span_ps(df, pl, "t_start_ps", "t_end_ps"))
+    df = df.with_columns(t_start=(pl.col("t_start_ps") / divisor))
     brush = alt.selection_interval(encodings=["x"], name="timeline_brush")
     return (
         alt.Chart(df)
         .mark_tick(thickness=2, opacity=0.6)
         .encode(
-            x=alt.X("t_start_fs:Q", title="t_start (fs)"),
+            x=alt.X("t_start:Q", title=label),
             y=alt.Y("bundle_name:N", title="bundle"),
             color=alt.condition(
                 brush, alt.Color("is_read:N", title="read?"), alt.value("lightgray")
@@ -104,8 +151,8 @@ def timeline(df: Any, *, bundle: str | None = None) -> Any:
                 "addr",
                 "len_beats",
                 "resp",
-                "t_start_fs",
-                "t_end_fs",
+                "t_start_ps",
+                "t_end_ps",
             ],
         )
         .add_params(brush)
@@ -165,7 +212,7 @@ def latency_cdf(df: Any, *, bundle: str | None = None) -> Any:
 
 def outstanding_depth(df: Any, *, bundle: str | None = None) -> Any:
     """Inflight transaction count per bundle, derived from
-    ``t_start_fs`` / ``t_end_fs`` overlaps.
+    ``t_start_ps`` / ``t_end_ps`` overlaps.
 
     Each txn contributes +1 at start, -1 at end; cumulative sum is
     the live outstanding count. Plotted as a step-area chart with
@@ -179,18 +226,18 @@ def outstanding_depth(df: Any, *, bundle: str | None = None) -> Any:
     starts = df.select(
         [
             pl.col("bundle_name"),
-            pl.col("t_start_fs").alias("t_fs"),
+            pl.col("t_start_ps").alias("t_ps"),
             pl.lit(1).alias("delta"),
         ]
     )
     ends = df.select(
         [
             pl.col("bundle_name"),
-            pl.col("t_end_fs").alias("t_fs"),
+            pl.col("t_end_ps").alias("t_ps"),
             pl.lit(-1).alias("delta"),
         ]
     )
-    events = pl.concat([starts, ends]).sort(["bundle_name", "t_fs"])
+    events = pl.concat([starts, ends]).sort(["bundle_name", "t_ps"])
     cumulative = events.with_columns(
         depth=pl.col("delta").cum_sum().over("bundle_name")
     )
@@ -199,14 +246,16 @@ def outstanding_depth(df: Any, *, bundle: str | None = None) -> Any:
         stride = max(1, cumulative.height // DOWNSAMPLE_THRESHOLD)
         cumulative = cumulative.gather_every(stride)
 
+    divisor, label = _pick_time_unit(_time_span_ps(cumulative, pl, "t_ps"))
+    cumulative = cumulative.with_columns(t=(pl.col("t_ps") / divisor))
     return (
         alt.Chart(cumulative)
         .mark_area(opacity=0.4, interpolate="step-after")
         .encode(
-            x=alt.X("t_fs:Q", title="t (fs)"),
+            x=alt.X("t:Q", title=label),
             y=alt.Y("depth:Q", title="outstanding"),
             color=alt.Color("bundle_name:N"),
-            tooltip=["bundle_name", "t_fs", "depth"],
+            tooltip=["bundle_name", "t_ps", "depth"],
         )
         .properties(height=200, title="Outstanding-depth over time")
         .interactive()
@@ -266,7 +315,7 @@ def fairness(df: Any, *, window_size: int = 256) -> Any:
     bytes_per = (pl.col("len_beats") * pl.lit(2).pow(pl.col("size_log2"))).cast(
         pl.Int64
     )
-    df = df.with_columns(bytes_per_txn=bytes_per).sort("t_start_fs")
+    df = df.with_columns(bytes_per_txn=bytes_per).sort("t_start_ps")
 
     # Walk windows. Pure-python loop (window count is small) avoids
     # a complex polars rolling expr that doesn't generalise well to
@@ -286,35 +335,39 @@ def fairness(df: Any, *, window_size: int = 256) -> Any:
         n_b = sum(1 for x in xs if x > 0)
         denom = n_b * sum(x * x for x in xs)
         jain = (sum(xs) ** 2) / denom if denom > 0 else 1.0
-        t_mid = (chunk["t_start_fs"].min() + chunk["t_start_fs"].max()) / 2
-        windows.append({"t_fs": t_mid, "jain": jain, "n_bundles": n_b})
+        t_mid = (chunk["t_start_ps"].min() + chunk["t_start_ps"].max()) / 2
+        windows.append({"t_ps": t_mid, "jain": jain, "n_bundles": n_b})
 
     pdf = (
         pl.DataFrame(windows)
         if windows
         else pl.DataFrame(
-            schema={"t_fs": pl.Float64, "jain": pl.Float64, "n_bundles": pl.Int64}
+            schema={"t_ps": pl.Float64, "jain": pl.Float64, "n_bundles": pl.Int64}
         )
     )
+    divisor, label = _pick_time_unit(_time_span_ps(pdf, pl, "t_ps"))
+    pdf = pdf.with_columns(t=(pl.col("t_ps") / divisor))
     return (
         alt.Chart(pdf)
         .mark_line(point=True)
         .encode(
-            x=alt.X("t_fs:Q", title="t (fs)"),
+            x=alt.X("t:Q", title=label),
             y=alt.Y("jain:Q", title="Jain fairness", scale=alt.Scale(domain=[0, 1])),
-            tooltip=["t_fs", alt.Tooltip("jain:Q", format=".3f"), "n_bundles"],
+            tooltip=["t_ps", alt.Tooltip("jain:Q", format=".3f"), "n_bundles"],
         )
         .properties(height=200, title=f"Sliding-window fairness ({window_size}-txn)")
         .interactive()
     )
 
 
-def throughput(df: Any, *, window_fs: int = 10_000_000) -> Any:
+def throughput(df: Any, *, window_ps: int = 10_000) -> Any:
     """Rolling-window bytes/s per bundle.
 
-    Bins transactions by ``t_start_fs`` into windows of ``window_fs``
-    femtoseconds, sums bytes, and reports per-bundle throughput in
-    bits/s for symmetry with the dashboard summary.
+    Bins transactions by ``t_start_ps`` into windows of ``window_ps``
+    picoseconds, sums bytes, and reports per-bundle throughput in
+    bits/s for symmetry with the dashboard summary. Default 10 ns
+    window is a reasonable starting point for ~100 MHz–1 GHz designs;
+    pass ``window_ps`` to override for slower / faster designs.
     """
     alt, pl = _imports()
     df = _ensure_polars(df, pl)
@@ -325,31 +378,33 @@ def throughput(df: Any, *, window_fs: int = 10_000_000) -> Any:
     binned = df.with_columns(
         [
             bytes_per.alias("bytes_per_txn"),
-            (pl.col("t_start_fs") // window_fs).alias("bin"),
+            (pl.col("t_start_ps") // window_ps).alias("bin"),
         ]
     )
     agg = binned.group_by(["bundle_name", "bin"]).agg(
         pl.col("bytes_per_txn").sum().alias("bytes")
     )
-    # Per-second normalisation: 1 fs = 1e-15 s, so bps = bytes / (window_fs * 1e-15) * 8.
+    # Per-second normalisation: 1 ps = 1e-12 s, so bps = bytes / (window_ps * 1e-12) * 8.
     agg = agg.with_columns(
-        bps=(pl.col("bytes") * 8.0) / (window_fs * 1e-15),
-        t_fs=pl.col("bin") * window_fs,
+        bps=(pl.col("bytes") * 8.0) / (window_ps * 1e-12),
+        t_ps=pl.col("bin") * window_ps,
     )
+    divisor, label = _pick_time_unit(_time_span_ps(agg, pl, "t_ps"))
+    agg = agg.with_columns(t=(pl.col("t_ps") / divisor))
     return (
         alt.Chart(agg)
         .mark_line()
         .encode(
-            x=alt.X("t_fs:Q", title="t (fs)"),
+            x=alt.X("t:Q", title=label),
             y=alt.Y("bps:Q", title="throughput (bits/s)"),
             color=alt.Color("bundle_name:N"),
             tooltip=[
                 "bundle_name",
-                "t_fs",
+                "t_ps",
                 alt.Tooltip("bps:Q", format=".2e"),
             ],
         )
-        .properties(height=200, title=f"Throughput ({window_fs} fs bins)")
+        .properties(height=200, title=f"Throughput ({window_ps} ps bins)")
         .interactive()
     )
 

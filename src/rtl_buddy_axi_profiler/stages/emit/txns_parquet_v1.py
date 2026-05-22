@@ -1,4 +1,4 @@
-"""Per-transaction parquet emit stage (schema v1).
+"""Per-transaction parquet emit stage (schema v1.1).
 
 Writes one row per reconstructed AXI transaction to a parquet file.
 Sibling artifact to ``axi-perf.json``; consumed by the marimo
@@ -9,6 +9,15 @@ as its input — this stage takes the reconstructed ``Transaction``
 stream directly, so it does not conform to that Protocol. The CLI
 orchestrates: it materializes the transaction stream once and drives
 both ``aggregate`` and this emit off the same list.
+
+**v1.1**: time columns are now picoseconds (``_ps``) instead of
+femtoseconds (``_fs``). ps still resolves a single cycle for
+multi-GHz sim clocks (1 GHz period = 1000 ps; 5 GHz = 200 ps),
+while shrinking absolute values by 1000× — meaningful for snappy
+compression and for readable axis labels in downstream notebooks.
+The :class:`Transaction` dataclass internally keeps femtosecond
+timestamps (FST's native precision); conversion to ps happens at
+emit time.
 
 pyarrow is an optional dependency (``[parquet]`` extra). Calling
 ``emit_txns_parquet`` without it raises :class:`TxnsParquetError`
@@ -24,7 +33,17 @@ from typing import Iterable
 from rtl_buddy_axi_profiler.types import Bundle, Manifest, Transaction
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
+
+# 1 ps = 1000 fs. FST timestamps land in fs; we drop the last three
+# digits to get ps. Sub-ps precision isn't observable at clock-edge
+# sampling, so this rounding is lossless for everything the
+# aggregator + notebook consume.
+_FS_PER_PS = 1000
+
+
+def _fs_to_ps(fs: int) -> int:
+    return fs // _FS_PER_PS
 
 
 class TxnsParquetError(RuntimeError):
@@ -70,16 +89,18 @@ def emit_txns_parquet(
 
         if t.is_read:
             # No R beat ever received → no first-data timestamp.
-            t_first = t.t_first_data_fs if t.t_first_data_fs != 0 else None
+            t_first_ps = (
+                _fs_to_ps(t.t_first_data_fs) if t.t_first_data_fs != 0 else None
+            )
             ar_to_r = (
                 round((t.t_first_data_fs - t.t_start_fs) / period_fs)
-                if t_first is not None and period_fs > 0
+                if t_first_ps is not None and period_fs > 0
                 else None
             )
             aw_to_b = None
         else:
             # Write txns don't have an R first-data event.
-            t_first = None
+            t_first_ps = None
             ar_to_r = None
             aw_to_b = (
                 round((t.t_end_fs - t.t_start_fs) / period_fs)
@@ -93,9 +114,9 @@ def emit_txns_parquet(
         columns["addr"].append(t.addr)
         columns["len_beats"].append(t.len_beats)
         columns["size_log2"].append(t.size_log2)
-        columns["t_start_fs"].append(t.t_start_fs)
-        columns["t_first_data_fs"].append(t_first)
-        columns["t_end_fs"].append(t.t_end_fs)
+        columns["t_start_ps"].append(_fs_to_ps(t.t_start_fs))
+        columns["t_first_data_ps"].append(t_first_ps)
+        columns["t_end_ps"].append(_fs_to_ps(t.t_end_fs))
         columns["resp"].append(t.resp)
         columns["ar_to_r_first_cyc"].append(ar_to_r)
         columns["aw_to_b_cyc"].append(aw_to_b)
@@ -121,9 +142,9 @@ _COLUMN_NAMES = (
     "addr",
     "len_beats",
     "size_log2",
-    "t_start_fs",
-    "t_first_data_fs",
-    "t_end_fs",
+    "t_start_ps",
+    "t_first_data_ps",
+    "t_end_ps",
     "resp",
     "ar_to_r_first_cyc",
     "aw_to_b_cyc",
@@ -141,9 +162,9 @@ def _arrow_schema(pa):
             pa.field("addr", pa.int64(), nullable=False),
             pa.field("len_beats", pa.int32(), nullable=False),
             pa.field("size_log2", pa.int32(), nullable=False),
-            pa.field("t_start_fs", pa.int64(), nullable=False),
-            pa.field("t_first_data_fs", pa.int64(), nullable=True),
-            pa.field("t_end_fs", pa.int64(), nullable=False),
+            pa.field("t_start_ps", pa.int64(), nullable=False),
+            pa.field("t_first_data_ps", pa.int64(), nullable=True),
+            pa.field("t_end_ps", pa.int64(), nullable=False),
             pa.field("resp", pa.int8(), nullable=False),
             pa.field("ar_to_r_first_cyc", pa.int64(), nullable=True),
             pa.field("aw_to_b_cyc", pa.int64(), nullable=True),
