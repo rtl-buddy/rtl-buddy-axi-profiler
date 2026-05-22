@@ -64,7 +64,7 @@ def _read_txn() -> Transaction:
         len_beats=4,
         size_log2=3,
         t_start_fs=1_000_000,
-        t_first_data_fs=3_000_000,   # 2_000_000 fs after start = 1 cycle at 2 ns
+        t_first_data_fs=3_000_000,  # 2_000_000 fs after start = 1 cycle at 2 ns
         t_end_fs=11_000_000,
         resp=0,
     )
@@ -79,9 +79,9 @@ def _write_txn() -> Transaction:
         len_beats=2,
         size_log2=3,
         t_start_fs=20_000_000,
-        t_first_data_fs=20_000_000,   # writes mirror t_aw_fs here
-        t_end_fs=26_000_000,          # 6_000_000 fs after start = 3 cycles at 2 ns
-        resp=2,                       # SLVERR
+        t_first_data_fs=20_000_000,  # writes mirror t_aw_fs here
+        t_end_fs=26_000_000,  # 6_000_000 fs after start = 3 cycles at 2 ns
+        resp=2,  # SLVERR
     )
 
 
@@ -108,7 +108,7 @@ def test_roundtrip_read_and_write_rows(tmp_path: Path) -> None:
     assert read_row["t_first_data_fs"] == 3_000_000
     assert read_row["t_end_fs"] == 11_000_000
     assert read_row["resp"] == 0
-    assert read_row["ar_to_r_first_cyc"] == 1   # (3_000_000 - 1_000_000) / 2_000_000
+    assert read_row["ar_to_r_first_cyc"] == 1  # (3_000_000 - 1_000_000) / 2_000_000
     assert read_row["aw_to_b_cyc"] is None
     assert read_row["master_path"] == "soc.u_cpu"
     assert read_row["slave_path"] == "soc.u_xbar"
@@ -117,7 +117,7 @@ def test_roundtrip_read_and_write_rows(tmp_path: Path) -> None:
     assert write_row["is_read"] is False
     assert write_row["t_first_data_fs"] is None
     assert write_row["ar_to_r_first_cyc"] is None
-    assert write_row["aw_to_b_cyc"] == 3        # (26 - 20) / 2 = 3
+    assert write_row["aw_to_b_cyc"] == 3  # (26 - 20) / 2 = 3
     assert write_row["resp"] == 2
 
 
@@ -178,9 +178,20 @@ def test_empty_transactions_yields_zero_row_file(tmp_path: Path) -> None:
     table = pq.read_table(out)
     assert table.num_rows == 0
     assert set(table.column_names) == {
-        "bundle_name", "is_read", "txn_id", "addr", "len_beats", "size_log2",
-        "t_start_fs", "t_first_data_fs", "t_end_fs", "resp",
-        "ar_to_r_first_cyc", "aw_to_b_cyc", "master_path", "slave_path",
+        "bundle_name",
+        "is_read",
+        "txn_id",
+        "addr",
+        "len_beats",
+        "size_log2",
+        "t_start_fs",
+        "t_first_data_fs",
+        "t_end_fs",
+        "resp",
+        "ar_to_r_first_cyc",
+        "aw_to_b_cyc",
+        "master_path",
+        "slave_path",
     }
 
 

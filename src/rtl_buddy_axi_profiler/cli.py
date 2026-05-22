@@ -181,9 +181,7 @@ def run(
             except TxnsParquetError as e:
                 typer.echo(str(e), err=True)
                 raise typer.Exit(code=2) from None
-            typer.echo(
-                f"wrote {parquet_target} ({len(txns_list)} txns).", err=True
-            )
+            typer.echo(f"wrote {parquet_target} ({len(txns_list)} txns).", err=True)
     except WellenIngestError as e:
         typer.echo(f"ingest failed: {e}", err=True)
         raise typer.Exit(code=1) from None

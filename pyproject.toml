@@ -83,3 +83,11 @@ files = ["src/rtl_buddy_axi_profiler"]
 [[tool.mypy.overrides]]
 module = "pywellen"
 ignore_missing_imports = true
+
+# pyarrow lives under the [parquet] optional extra; the lint job
+# doesn't install extras, so its imports are unresolvable. The
+# txns_parquet_v1 module guards every import behind a try/except
+# anyway — typecheck only the surrounding contract.
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.parquet"]
+ignore_missing_imports = true
