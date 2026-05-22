@@ -46,26 +46,89 @@ def run(
     ),
     discover: str = typer.Option("verible", "--discover", help="Discover stage."),
     ingest: str = typer.Option(
-        "fst", "--ingest", help="Ingest stage (fst | vcd | stream)."
+        "wellen", "--ingest", help="Ingest stage (wellen | stream)."
     ),
-    reconstruct: str = typer.Option("axi4", "--reconstruct", help="Reconstruct stage."),
-    aggregate: str = typer.Option("standard", "--aggregate", help="Aggregate stage."),
-    emit: str = typer.Option("json-v1", "--emit", help="Emit stage."),
+    reconstruct_stage: str = typer.Option(
+        "axi4", "--reconstruct", help="Reconstruct stage."
+    ),
+    aggregate_stage: str = typer.Option(
+        "standard", "--aggregate", help="Aggregate stage."
+    ),
+    emit_stage: str = typer.Option("json-v1", "--emit", help="Emit stage."),
 ) -> None:
-    """Run the full pipeline end-to-end. NOT YET IMPLEMENTED."""
-    typer.echo(
-        f"axi-profiler run is not yet implemented. The bootstrap "
-        f"(rtl-buddy-axi-profiler#1) ships the skeleton, schemas, and "
-        f"stage Protocol contracts only. The pipeline stages land in:\n"
-        f"  #2 discover (verible)\n"
-        f"  #3 ingest (fst/vcd) + reconstruct + aggregate + emit\n"
-        f"  #4 ingest (stream) + gen-monitor\n"
-        f"Selected stages: {discover}/{ingest}/{reconstruct}/{aggregate}/{emit}\n"
-        f"Inputs: filelist={filelist} top={top} -i {input_path} -o {output}"
-        + (f" manifest={manifest}" if manifest else ""),
-        err=True,
+    """Run the full pipeline end-to-end.
+
+    v1 wires discover=verible, ingest=wellen, reconstruct=axi4,
+    aggregate=standard, emit=json-v1. Other stage variants land in
+    follow-up PRs (#4 stream path).
+    """
+    from rtl_buddy_axi_profiler.stages.aggregate.standard import aggregate as _aggregate
+    from rtl_buddy_axi_profiler.stages.discover.verible import (
+        VeribleDiscover,
+        discover_to_yaml,
     )
-    raise typer.Exit(code=2)
+    from rtl_buddy_axi_profiler.stages.emit.json_v1 import emit as _emit
+    from rtl_buddy_axi_profiler.stages.ingest.wellen import (
+        WellenIngest,
+        WellenIngestError,
+    )
+    from rtl_buddy_axi_profiler.stages.reconstruct.axi4 import (
+        reconstruct as _reconstruct,
+    )
+
+    if discover != "verible":
+        typer.echo(f"unknown discover stage {discover!r}", err=True)
+        raise typer.Exit(code=2)
+    if ingest != "wellen":
+        typer.echo(
+            f"ingest={ingest!r} not yet wired in cli.run; use 'wellen' for v1.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if reconstruct_stage != "axi4":
+        typer.echo(f"unknown reconstruct stage {reconstruct_stage!r}", err=True)
+        raise typer.Exit(code=2)
+    if aggregate_stage != "standard":
+        typer.echo(f"unknown aggregate stage {aggregate_stage!r}", err=True)
+        raise typer.Exit(code=2)
+    if emit_stage != "json-v1":
+        typer.echo(f"unknown emit stage {emit_stage!r}", err=True)
+        raise typer.Exit(code=2)
+
+    if manifest is None:
+        # Generate manifest on the fly into a temp path next to output.
+        manifest_path = output.parent / "axi-bundles.yaml"
+        manifest_obj = discover_to_yaml(
+            filelist=filelist, top=top, output=manifest_path
+        )
+        typer.echo(
+            f"discover wrote {manifest_path} ({len(manifest_obj.bundles)} bundle(s)).",
+            err=True,
+        )
+    else:
+        from rtl_buddy_axi_profiler.stages.discover._sv_parser import parse_files
+
+        _ = parse_files  # imported to keep module hot; unused
+        manifest_obj = VeribleDiscover().run(filelist=filelist, top=top)
+
+    ingest_stage = WellenIngest()
+    try:
+        events = ingest_stage.run(input_path, manifest_obj)
+        txns = _reconstruct(events)
+        clock = ingest_stage.detected_clock
+        cycles = len(clock.posedge_times) if clock else 0
+        period_ns = (clock.period_fs / 1e6) if clock else 1.0
+        stats = _aggregate(
+            txns, manifest_obj, duration_cycles=cycles, clock_period_ns=period_ns
+        )
+        _emit(stats, manifest_obj, output)
+    except WellenIngestError as e:
+        typer.echo(f"ingest failed: {e}", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(
+        f"wrote {output} ({len(manifest_obj.bundles)} bundles, "
+        f"{cycles} cycles, clock={clock.full_name if clock else 'none'})."
+    )
 
 
 @app.command("discover")
