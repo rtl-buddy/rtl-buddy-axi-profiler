@@ -29,10 +29,26 @@ dependencies = [
 # [parquet]: used by stages/emit/txns_parquet_v1.py — see issue #17.
 #            Drives the per-transaction parquet artifact that the
 #            marimo notebook drill-down (umbrella #16) consumes.
+# [notebook]: used by notebook/template.py — see issue #18. Marimo
+#            notebook template + altair plot library that loads the
+#            parquet emitted under [parquet] and renders the v1
+#            drill-down charts. Polars over pandas: lazy frames keep
+#            zoom/brush snappy on the row counts we expect.
 [project.optional-dependencies]
 fst = []
 verible = []
 parquet = ["pyarrow>=14"]
+notebook = [
+    "marimo>=0.9",
+    "altair>=5",
+    "polars>=1.0",
+    "pyarrow>=14",
+    # pandas is altair's internal serialization backend for some
+    # chart-construction paths (transform_window CDF, certain mark
+    # types). Polars covers our actual data ops; pandas just keeps
+    # altair happy without forcing the user to install it manually.
+    "pandas>=2",
+]
 
 [project.scripts]
 axi-profiler = "rtl_buddy_axi_profiler:main"
@@ -90,4 +106,12 @@ ignore_missing_imports = true
 # anyway — typecheck only the surrounding contract.
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.parquet"]
+ignore_missing_imports = true
+
+# marimo / altair / polars / pandas live under the [notebook]
+# optional extra (same lint-doesn't-install-extras reasoning). The
+# notebook subpackage guards them at module level so the rest of
+# the package imports without them installed.
+[[tool.mypy.overrides]]
+module = ["marimo", "altair", "polars", "pandas"]
 ignore_missing_imports = true
