@@ -73,8 +73,19 @@ class WellenIngestError(RuntimeError):
     """Raised when the trace can't be opened or a manifest signal is missing."""
 
 
-def ingest(source: Path, manifest: Manifest) -> Iterator[HandshakeEvent]:
+def ingest(
+    source: Path,
+    manifest: Manifest,
+    *,
+    tb_prefix: str = "",
+) -> Iterator[HandshakeEvent]:
     """Yield HandshakeEvent objects from a waveform file.
+
+    ``tb_prefix`` is prepended to every manifest signal path when
+    the direct lookup misses. Typical values: ``"tb.dut"`` /
+    ``"tb_<design>.u_dut"`` — whatever the testbench wraps the
+    design under. Empty string (the default) means lookups use the
+    manifest paths verbatim.
 
     See :class:`WellenIngest` for the entry-point class wrapper.
     """
@@ -83,13 +94,18 @@ def ingest(source: Path, manifest: Manifest) -> Iterator[HandshakeEvent]:
     except Exception as e:
         raise WellenIngestError(f"could not open trace {source}: {e}") from None
 
-    bundles = _resolve_bundles(waveform, _flat_bundles(manifest.bundles))
-    bundle_clocks = _resolve_bundle_clocks(waveform, bundles)
+    bundles = _resolve_bundles(
+        waveform, _flat_bundles(manifest.bundles), tb_prefix=tb_prefix
+    )
+    bundle_clocks = _resolve_bundle_clocks(waveform, bundles, tb_prefix=tb_prefix)
     yield from _emit_events(waveform, bundle_clocks)
 
 
 def _resolve_bundle_clocks(
-    waveform: pywellen.Waveform, bundles: list[_BundleSignals]
+    waveform: pywellen.Waveform,
+    bundles: list[_BundleSignals],
+    *,
+    tb_prefix: str = "",
 ) -> list[tuple[_BundleSignals, DetectedClock]]:
     """Pair each bundle with its clock.
 
@@ -102,10 +118,19 @@ def _resolve_bundle_clocks(
     for bs in bundles:
         path = bs.bundle.clock_signal
         if path:
-            try:
-                clock = resolve_bundle_clock(waveform, path)
-            except ClockDetectError as e:
-                raise WellenIngestError(f"bundle {bs.bundle.name!r}: {e}") from None
+            resolved = _try_paths(path, tb_prefix)
+            last_error: ClockDetectError | None = None
+            clock = None
+            for candidate in resolved:
+                try:
+                    clock = resolve_bundle_clock(waveform, candidate)
+                    break
+                except ClockDetectError as e:
+                    last_error = e
+            if clock is None:
+                raise WellenIngestError(
+                    f"bundle {bs.bundle.name!r}: {last_error}"
+                ) from None
         else:
             # Legacy fallback: single global autodetect, cached on
             # first miss.
@@ -226,39 +251,61 @@ def _to_int(value) -> int:
 
 
 def _resolve_bundles(
-    waveform: pywellen.Waveform, bundles_by_name: dict[str, Bundle]
+    waveform: pywellen.Waveform,
+    bundles_by_name: dict[str, Bundle],
+    *,
+    tb_prefix: str = "",
 ) -> list[_BundleSignals]:
     """Look up every required signal handle once; bail on missing
     signals so the user can fix the manifest before the long sim run."""
     out: list[_BundleSignals] = []
     for bundle in bundles_by_name.values():
         try:
-            out.append(_resolve_bundle(waveform, bundle))
+            out.append(_resolve_bundle(waveform, bundle, tb_prefix=tb_prefix))
         except WellenIngestError as e:
             raise WellenIngestError(f"bundle {bundle.name!r}: {e}") from None
     return out
 
 
-def _resolve_bundle(waveform: pywellen.Waveform, bundle: Bundle) -> _BundleSignals:
+def _try_paths(path: str, tb_prefix: str) -> list[str]:
+    """Candidate signal paths to try, in priority order.
+
+    Direct path first (most precise); tb_prefix-prepended fallback
+    second. An empty tb_prefix collapses to just the direct path.
+    """
+    if not tb_prefix:
+        return [path]
+    return [path, f"{tb_prefix.rstrip('.')}.{path}"]
+
+
+def _resolve_bundle(
+    waveform: pywellen.Waveform, bundle: Bundle, *, tb_prefix: str = ""
+) -> _BundleSignals:
+    def _lookup(path: str) -> pywellen.Signal | None:
+        for candidate in _try_paths(path, tb_prefix):
+            try:
+                return waveform.get_signal_from_path(candidate)
+            except Exception:
+                continue
+        return None
+
     def required(role: str) -> pywellen.Signal:
         path = bundle.signals.get(role)
         if not path:
             raise WellenIngestError(f"missing required signal {role!r}")
-        try:
-            return waveform.get_signal_from_path(path)
-        except Exception:
+        sig = _lookup(path)
+        if sig is None:
             raise WellenIngestError(
-                f"signal {path!r} (role={role!r}) not found in trace"
-            ) from None
+                f"signal {path!r} (role={role!r}) not found in trace; "
+                f"tried {_try_paths(path, tb_prefix)}"
+            )
+        return sig
 
     def optional(role: str) -> pywellen.Signal | None:
         path = bundle.signals.get(role)
         if not path:
             return None
-        try:
-            return waveform.get_signal_from_path(path)
-        except Exception:
-            return None
+        return _lookup(path)
 
     return _BundleSignals(
         bundle=bundle,
@@ -303,9 +350,10 @@ class WellenIngest:
 
     name = "wellen"
 
-    def __init__(self) -> None:
+    def __init__(self, *, tb_prefix: str = "") -> None:
         self._detected_clock: DetectedClock | None = None
         self._bundle_clocks: list[tuple[str, DetectedClock]] = []
+        self.tb_prefix = tb_prefix
 
     @property
     def detected_clock(self) -> DetectedClock | None:
@@ -330,8 +378,12 @@ class WellenIngest:
             waveform = pywellen.Waveform(str(source))
         except Exception as e:
             raise WellenIngestError(f"could not open trace {source}: {e}") from None
-        bundles = _resolve_bundles(waveform, _flat_bundles(manifest.bundles))
-        bundle_clocks = _resolve_bundle_clocks(waveform, bundles)
+        bundles = _resolve_bundles(
+            waveform, _flat_bundles(manifest.bundles), tb_prefix=self.tb_prefix
+        )
+        bundle_clocks = _resolve_bundle_clocks(
+            waveform, bundles, tb_prefix=self.tb_prefix
+        )
         self._bundle_clocks = [(bs.bundle.name, clock) for bs, clock in bundle_clocks]
         if bundle_clocks:
             # Pick the clock with the most posedges as the representative —
