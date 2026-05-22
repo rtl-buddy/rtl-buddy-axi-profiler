@@ -103,6 +103,7 @@ docs/
 ```bash
 # from repo root
 uv sync                        # set up env (Python 3.13; see .python-version)
+uv run python scripts/fetch_verible.py   # one-time: install pinned Verible
 uv run ruff check              # lint (must pass)
 uv run ruff format --check     # format check (CI enforces this)
 uv run mypy                    # type check (must pass; src/ scope only)
@@ -111,6 +112,8 @@ uv run pytest -q               # full unit suite
 # CLI smoke
 uv run axi-profiler --help
 ```
+
+The Verible fetch only runs once per pinned version; subsequent runs find the binary under `vendor/verible/`. If `verible-verilog-syntax` is already on `PATH` (Homebrew / system install), the fetcher's output goes unused.
 
 CI runs ruff + mypy (`lint.yml`) and pytest (`test.yml`, matrix
 3.12 / 3.13) on every PR. Run them locally before pushing.

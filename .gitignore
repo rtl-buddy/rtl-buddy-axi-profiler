@@ -12,3 +12,4 @@ htmlcov/
 coverage.xml
 *.swp
 .DS_Store
+vendor/
