@@ -360,14 +360,19 @@ def fairness(df: Any, *, window_size: int = 256) -> Any:
     )
 
 
-def throughput(df: Any, *, window_ps: int = 10_000) -> Any:
-    """Rolling-window bytes/s per bundle.
+def throughput(df: Any, *, window_ps: int = 1_000_000) -> Any:
+    """Rolling-window throughput per bundle, displayed in GB/s.
 
     Bins transactions by ``t_start_ps`` into windows of ``window_ps``
-    picoseconds, sums bytes, and reports per-bundle throughput in
-    bits/s for symmetry with the dashboard summary. Default 10 ns
-    window is a reasonable starting point for ~100 MHz–1 GHz designs;
-    pass ``window_ps`` to override for slower / faster designs.
+    picoseconds, sums bytes, and shows per-bundle throughput in
+    **gigabytes per second** — the natural unit for modern AXI fabrics
+    where realistic wire speeds land in the multi-GB/s range. The
+    underlying axi-perf.json roll-up still reports bits/sec; this plot
+    converts at the display boundary (``GB/s = bytes_per_s / 1e9``).
+
+    Default window is 1 μs — coarse enough to keep the line readable
+    on multi-ms sims but fine enough to spot per-burst variation on
+    100 ns – 10 μs runs. Pass ``window_ps`` to override.
     """
     alt, pl = _imports()
     df = _ensure_polars(df, pl)
@@ -384,27 +389,33 @@ def throughput(df: Any, *, window_ps: int = 10_000) -> Any:
     agg = binned.group_by(["bundle_name", "bin"]).agg(
         pl.col("bytes_per_txn").sum().alias("bytes")
     )
-    # Per-second normalisation: 1 ps = 1e-12 s, so bps = bytes / (window_ps * 1e-12) * 8.
+    # Convert: bytes per bin → bytes per second → gigabytes per second.
+    # 1 ps = 1e-12 s, so bytes/s = bytes / (window_ps * 1e-12);
+    # GB/s = (bytes/s) / 1e9.
+    window_s = window_ps * 1e-12
     agg = agg.with_columns(
-        bps=(pl.col("bytes") * 8.0) / (window_ps * 1e-12),
+        gbps=pl.col("bytes") / (window_s * 1e9),
         t_ps=pl.col("bin") * window_ps,
     )
-    divisor, label = _pick_time_unit(_time_span_ps(agg, pl, "t_ps"))
+    divisor, time_label = _pick_time_unit(_time_span_ps(agg, pl, "t_ps"))
     agg = agg.with_columns(t=(pl.col("t_ps") / divisor))
     return (
         alt.Chart(agg)
         .mark_line()
         .encode(
-            x=alt.X("t:Q", title=label),
-            y=alt.Y("bps:Q", title="throughput (bits/s)"),
+            x=alt.X("t:Q", title=time_label),
+            y=alt.Y("gbps:Q", title="throughput (GB/s)"),
             color=alt.Color("bundle_name:N"),
             tooltip=[
                 "bundle_name",
                 "t_ps",
-                alt.Tooltip("bps:Q", format=".2e"),
+                alt.Tooltip("gbps:Q", format=".3f", title="GB/s"),
             ],
         )
-        .properties(height=200, title=f"Throughput ({window_ps} ps bins)")
+        .properties(
+            height=200,
+            title=f"Throughput ({window_ps / 1_000_000:g} μs bins)",
+        )
         .interactive()
     )
 

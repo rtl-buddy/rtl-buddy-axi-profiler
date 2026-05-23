@@ -152,6 +152,18 @@ def test_plots_render_with_microsecond_span() -> None:
         )
 
 
+def test_throughput_default_units_are_gigabytes_per_second() -> None:
+    """The throughput plot labels its y-axis in GB/s and its default
+    bin window is 1 μs. Lock both via the chart's JSON spec."""
+    chart = plots.throughput(_sample_df())
+    spec = chart.to_dict()
+    titles = _walk_for_titles(spec)
+    assert any("GB/s" in t for t in titles), f"expected 'GB/s' axis label, got {titles}"
+    assert any("1 μs bins" in t for t in titles), (
+        f"expected '1 μs bins' chart title, got {titles}"
+    )
+
+
 def _walk_for_titles(obj):
     """Collect every 'title' string anywhere in the altair JSON spec."""
     found: list[str] = []
