@@ -104,20 +104,21 @@ def test_roundtrip_read_and_write_rows(tmp_path: Path) -> None:
     assert read_row["addr"] == 0x1000
     assert read_row["len_beats"] == 4
     assert read_row["size_log2"] == 3
-    assert read_row["t_start_fs"] == 1_000_000
-    assert read_row["t_first_data_fs"] == 3_000_000
-    assert read_row["t_end_fs"] == 11_000_000
+    # v1.1 schema: ps = fs // 1000. Inputs are 1e6/3e6/11e6 fs → 1e3/3e3/11e3 ps.
+    assert read_row["t_start_ps"] == 1_000
+    assert read_row["t_first_data_ps"] == 3_000
+    assert read_row["t_end_ps"] == 11_000
     assert read_row["resp"] == 0
-    assert read_row["ar_to_r_first_cyc"] == 1  # (3_000_000 - 1_000_000) / 2_000_000
+    assert read_row["ar_to_r_first_cyc"] == 1  # (3e6 - 1e6) fs / 2e6 fs/cyc
     assert read_row["aw_to_b_cyc"] is None
     assert read_row["master_path"] == "soc.u_cpu"
     assert read_row["slave_path"] == "soc.u_xbar"
 
     write_row = by_id[12]
     assert write_row["is_read"] is False
-    assert write_row["t_first_data_fs"] is None
+    assert write_row["t_first_data_ps"] is None
     assert write_row["ar_to_r_first_cyc"] is None
-    assert write_row["aw_to_b_cyc"] == 3  # (26 - 20) / 2 = 3
+    assert write_row["aw_to_b_cyc"] == 3  # (26 - 20) fs / 2 fs/cyc... in 1e6 units
     assert write_row["resp"] == 2
 
 
@@ -135,17 +136,17 @@ def test_arrow_schema_types_and_nullability(tmp_path: Path) -> None:
     assert by_name["addr"].type == pa.int64()
     assert by_name["len_beats"].type == pa.int32()
     assert by_name["size_log2"].type == pa.int32()
-    assert by_name["t_start_fs"].type == pa.int64()
-    assert by_name["t_first_data_fs"].type == pa.int64()
-    assert by_name["t_end_fs"].type == pa.int64()
+    assert by_name["t_start_ps"].type == pa.int64()
+    assert by_name["t_first_data_ps"].type == pa.int64()
+    assert by_name["t_end_ps"].type == pa.int64()
     assert by_name["resp"].type == pa.int8()
     assert by_name["ar_to_r_first_cyc"].type == pa.int64()
     assert by_name["aw_to_b_cyc"].type == pa.int64()
     assert by_name["master_path"].type == pa.string()
     assert by_name["slave_path"].type == pa.string()
 
-    # Nullability: per #17 schema.
-    assert by_name["t_first_data_fs"].nullable is True
+    # Nullability: per v1.1 schema.
+    assert by_name["t_first_data_ps"].nullable is True
     assert by_name["ar_to_r_first_cyc"].nullable is True
     assert by_name["aw_to_b_cyc"].nullable is True
     assert by_name["bundle_name"].nullable is False
@@ -184,9 +185,9 @@ def test_empty_transactions_yields_zero_row_file(tmp_path: Path) -> None:
         "addr",
         "len_beats",
         "size_log2",
-        "t_start_fs",
-        "t_first_data_fs",
-        "t_end_fs",
+        "t_start_ps",
+        "t_first_data_ps",
+        "t_end_ps",
         "resp",
         "ar_to_r_first_cyc",
         "aw_to_b_cyc",
@@ -197,8 +198,8 @@ def test_empty_transactions_yields_zero_row_file(tmp_path: Path) -> None:
 
 def test_read_with_no_r_beats_yields_null_first_data(tmp_path: Path) -> None:
     """A read txn that never saw an R beat (sentinel
-    ``t_first_data_fs == 0``) emits null for both first-data and the
-    derived cycle latency."""
+    ``Transaction.t_first_data_fs == 0``) emits null for both
+    first-data ps and the derived cycle latency."""
     incomplete_read = Transaction(
         bundle_name="cpu_to_xbar",
         is_read=True,
@@ -214,7 +215,7 @@ def test_read_with_no_r_beats_yields_null_first_data(tmp_path: Path) -> None:
     out = tmp_path / "axi-txns.parquet"
     emit_txns_parquet([incomplete_read], _make_manifest(), out, clock_period_ns=2.0)
     row = pq.read_table(out).to_pylist()[0]
-    assert row["t_first_data_fs"] is None
+    assert row["t_first_data_ps"] is None
     assert row["ar_to_r_first_cyc"] is None
 
 

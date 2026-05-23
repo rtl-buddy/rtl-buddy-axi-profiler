@@ -103,10 +103,18 @@ The parquet columns the plots assume:
 | `is_read` | bool | reconstruct |
 | `txn_id` | i64 | reconstruct |
 | `addr`, `len_beats`, `size_log2` | int | reconstruct |
-| `t_start_fs`, `t_first_data_fs`, `t_end_fs` | i64 | ingest |
+| `t_start_ps`, `t_first_data_ps`, `t_end_ps` | i64 | ingest |
 | `resp` | i8 | reconstruct |
 | `ar_to_r_first_cyc`, `aw_to_b_cyc` | i64? | derived |
 | `master_path`, `slave_path` | str | manifest |
 
+Time columns are **picoseconds** (schema v1.1). ps still resolves a
+single cycle at multi-GHz sim frequencies (1 GHz = 1000 ps period,
+5 GHz = 200 ps), while shrinking absolute values 1000× compared to
+the original v1.0 `_fs` columns — meaningful for snappy-compressed
+file size and for readable plot axis labels. The plots automatically
+pick a display unit (ps / ns / μs / ms) per the data's time span via
+`_pick_time_unit`.
+
 See `stages/emit/txns_parquet_v1.py` for the producer side and the
-v1.0 schema lock.
+v1.1 schema lock.

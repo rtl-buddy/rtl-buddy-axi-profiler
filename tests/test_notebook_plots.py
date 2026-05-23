@@ -36,11 +36,9 @@ def _sample_df():
                     "addr": 0x1000 + i * 0x40,
                     "len_beats": 4,
                     "size_log2": 3,
-                    "t_start_fs": 1_000_000 + i * 100_000,
-                    "t_first_data_fs": (1_000_000 + i * 100_000 + 50_000)
-                    if is_read
-                    else None,
-                    "t_end_fs": 1_000_000 + i * 100_000 + 200_000,
+                    "t_start_ps": 1_000 + i * 100,
+                    "t_first_data_ps": (1_000 + i * 100 + 50) if is_read else None,
+                    "t_end_ps": 1_000 + i * 100 + 200,
                     "resp": 0,
                     "ar_to_r_first_cyc": 1 if is_read else None,
                     "aw_to_b_cyc": None if is_read else 3,
@@ -119,3 +117,51 @@ def test_notebook_extras_missing_message() -> None:
     [notebook] extras. Pin the phrasing so docs + error stay aligned."""
     err = plots.NotebookImportError("test")
     assert isinstance(err, RuntimeError)
+
+
+def test_pick_time_unit_boundaries() -> None:
+    """ps → ns → μs → ms at each 1000× boundary so axis labels stay
+    1–3 digits before the decimal."""
+    assert plots._pick_time_unit(0) == (1.0, "t (ps)")
+    assert plots._pick_time_unit(999) == (1.0, "t (ps)")
+    assert plots._pick_time_unit(1_000) == (1e3, "t (ns)")
+    assert plots._pick_time_unit(999_999) == (1e3, "t (ns)")
+    assert plots._pick_time_unit(1_000_000) == (1e6, "t (μs)")
+    assert plots._pick_time_unit(999_999_999) == (1e6, "t (μs)")
+    assert plots._pick_time_unit(1_000_000_000) == (1e9, "t (ms)")
+
+
+def test_plots_render_with_microsecond_span() -> None:
+    """A 50 μs span (50e6 ps) should make plots pick μs as the
+    display unit — locks the picker → plot wiring."""
+    df = _sample_df().with_columns(
+        [
+            (pl.col("t_start_ps") * 1_000_000).alias("t_start_ps"),
+            (pl.col("t_first_data_ps") * 1_000_000).alias("t_first_data_ps"),
+            (pl.col("t_end_ps") * 1_000_000).alias("t_end_ps"),
+        ]
+    )
+    # Timeline + outstanding_depth both consume the start/end times.
+    for fn in (plots.timeline, plots.outstanding_depth, plots.throughput):
+        chart = fn(df)
+        # Round-trip via the JSON spec to inspect the axis title.
+        spec = chart.to_dict()
+        axis_titles = _walk_for_titles(spec)
+        assert any("μs" in t or "ms" in t for t in axis_titles), (
+            f"{fn.__name__}: expected μs/ms axis label, got {axis_titles}"
+        )
+
+
+def _walk_for_titles(obj):
+    """Collect every 'title' string anywhere in the altair JSON spec."""
+    found: list[str] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "title" and isinstance(v, str):
+                found.append(v)
+            else:
+                found.extend(_walk_for_titles(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_walk_for_titles(item))
+    return found
