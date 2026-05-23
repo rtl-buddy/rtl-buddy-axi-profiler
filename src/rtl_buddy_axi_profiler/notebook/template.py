@@ -22,11 +22,11 @@ the rest of the cells, so changing one filter reflows the others.
 
 import marimo
 
-__generated_with = "0.9.0"
+__generated_with = "0.23.7"
 app = marimo.App(width="medium", app_title="axi-perf drill-down")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import marimo as mo
     import os
@@ -34,7 +34,7 @@ def _():
     return mo, os
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo, os):
     """Header — show the loaded parquet path, fail fast if unset."""
     path = os.environ.get("AXI_TXNS_PARQUET")
@@ -49,7 +49,7 @@ def _(mo, os):
     return (parquet_path,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo, parquet_path):
     """Load the parquet + render a one-line summary."""
     import polars as pl
@@ -62,7 +62,7 @@ def _(mo, parquet_path):
     return df, pl
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, mo):
     """Bundle selector — feeds every per-bundle plot below."""
     bundle_dd = mo.ui.dropdown(
@@ -74,13 +74,13 @@ def _(df, mo):
     return (bundle_dd,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(bundle_dd):
     selected_bundle = None if bundle_dd.value == "(all)" else bundle_dd.value
     return (selected_bundle,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, mo):
     """Downsample warning when full timeline / outstanding-depth
     would be slow to render."""
@@ -96,10 +96,10 @@ def _(df, mo):
             ),
             kind="warn",
         )
-    return (DOWNSAMPLE_THRESHOLD,)
+    return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import timeline
 
@@ -107,7 +107,7 @@ def _(df, selected_bundle):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import latency_cdf
 
@@ -115,7 +115,7 @@ def _(df, selected_bundle):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import outstanding_depth
 
@@ -123,7 +123,7 @@ def _(df, selected_bundle):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import id_heatmap
 
@@ -131,7 +131,7 @@ def _(df, selected_bundle):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df):
     """Fairness is interconnect-level — bundle filter intentionally
     doesn't apply here (a single bundle has no fairness peers)."""
@@ -141,7 +141,7 @@ def _(df):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(df, pl, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import throughput
 
