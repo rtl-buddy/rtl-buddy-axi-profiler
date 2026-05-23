@@ -47,7 +47,7 @@ def _read_txn(
     *,
     bundle: str = "cpu_to_dram",
     txn_id: int = 1,
-    len_beats: int = 0,
+    len_beats: int = 1,
     t_start: int = 0,
     t_first: int = 10,
     t_end: int = 20,
@@ -71,7 +71,7 @@ def _write_txn(
     *,
     bundle: str = "cpu_to_dram",
     txn_id: int = 1,
-    len_beats: int = 0,
+    len_beats: int = 1,
     t_start: int = 0,
     t_end: int = 20,
     resp: int = 0,
@@ -103,10 +103,13 @@ def test_aggregate_counts_reads_and_writes() -> None:
         design_top="soc",
         bundles=(_bundle(),),
     )
+    # Transaction.len_beats is actual beat count (1..256) since the
+    # reconstruct stage applies AxLEN + 1. Build the synthetic txns
+    # the same way.
     txns = [
-        _read_txn(txn_id=1, len_beats=0),
-        _read_txn(txn_id=2, len_beats=3, t_start=10, t_first=15, t_end=30),
-        _write_txn(txn_id=1, len_beats=1, t_start=5, t_end=25),
+        _read_txn(txn_id=1, len_beats=1),
+        _read_txn(txn_id=2, len_beats=4, t_start=10, t_first=15, t_end=30),
+        _write_txn(txn_id=1, len_beats=2, t_start=5, t_end=25),
     ]
     stats = aggregate(iter(txns), manifest, duration_cycles=100, clock_period_ns=2.0)
     assert len(stats.bundles) == 1

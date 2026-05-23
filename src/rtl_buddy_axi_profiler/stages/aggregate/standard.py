@@ -144,8 +144,9 @@ def _accumulate_transaction(acc: _BundleAcc, txn: Transaction) -> None:
 
     if txn.is_read:
         acc.read_txns += 1
-        # AXI len is encoded as beats - 1.
-        acc.read_beats += txn.len_beats + 1
+        # Transaction.len_beats is already the actual beat count
+        # (reconstruct applies AxLEN + 1); no further conversion here.
+        acc.read_beats += txn.len_beats
         acc.ar_to_r_first.add(_cycles_between(txn.t_start_fs, txn.t_first_data_fs))
         acc.read_max_t_fs = max(acc.read_max_t_fs, txn.t_end_fs)
         # Outstanding is approximated from the end of one txn relative
@@ -155,7 +156,7 @@ def _accumulate_transaction(acc: _BundleAcc, txn: Transaction) -> None:
         acc.read_outstanding_peak = max(acc.read_outstanding_peak, 1)
     else:
         acc.write_txns += 1
-        acc.write_beats += txn.len_beats + 1
+        acc.write_beats += txn.len_beats
         acc.aw_to_b.add(_cycles_between(txn.t_start_fs, txn.t_end_fs))
         acc.write_max_t_fs = max(acc.write_max_t_fs, txn.t_end_fs)
         acc.write_outstanding_sum += 1
