@@ -8,6 +8,8 @@ transaction-derived metrics only.
 
 from __future__ import annotations
 
+import pytest
+
 from rtl_buddy_axi_profiler.stages.aggregate.standard import (
     StandardAggregate,
     _build_log2_hist,
@@ -122,6 +124,42 @@ def test_aggregate_counts_reads_and_writes() -> None:
     # Throughput is computed from total bytes / elapsed time
     assert bs.read_bps > 0
     assert bs.write_bps > 0
+
+
+def test_throughput_is_bits_per_second_not_bytes() -> None:
+    """Regression: ``read_bps`` / ``write_bps`` are bits per second.
+
+    The field name (\"bps\") and the v1 axi-perf.json schema both say
+    bits/sec. The implementation was missing the ×8 byte→bit
+    conversion. Lock both reads and writes to a known value.
+    """
+    manifest = Manifest(
+        schema_version="1.0",
+        design_top="soc",
+        bundles=(_bundle(data_width=32),),
+    )
+    # Single 4-beat read at t=0 → end=1e9 fs = 1ms; 4 beats × 4 B/beat
+    # = 16 B; bits/sec = 16 × 8 / 1e-6 = 128e6 bps. (elapsed is in
+    # ns-scale here because aggregate uses max(t_end) / 1e15 as the
+    # second-domain elapsed time. 1e9 fs == 1e-6 s.)
+    txns = [
+        _read_txn(txn_id=1, len_beats=4, t_start=0, t_first=10, t_end=1_000_000_000),
+    ]
+    stats = aggregate(iter(txns), manifest, duration_cycles=100, clock_period_ns=2.0)
+    bs = stats.bundles[0]
+    # 4 beats × 4 bytes/beat × 8 bits/byte ÷ 1e-6 s = 128_000_000 bps.
+    # If anyone drops the ×8 again this assertion breaks.
+    assert bs.read_bps == pytest.approx(128_000_000, rel=1e-9)
+    # Same arithmetic in reverse for writes.
+    write_txns = [
+        _write_txn(txn_id=2, len_beats=8, t_start=0, t_end=2_000_000_000),
+    ]
+    stats_w = aggregate(
+        iter(write_txns), manifest, duration_cycles=100, clock_period_ns=2.0
+    )
+    bs_w = stats_w.bundles[0]
+    # 8 beats × 4 bytes/beat × 8 bits/byte ÷ 2e-6 s = 128_000_000 bps.
+    assert bs_w.write_bps == pytest.approx(128_000_000, rel=1e-9)
 
 
 def test_aggregate_counts_errors() -> None:

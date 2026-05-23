@@ -185,14 +185,16 @@ def _finalize(acc: _BundleAcc, clock_period_ns: float) -> BundleStats:
     for ch in Channel:
         bundle_stats.channels[ch] = ChannelStats()
 
-    # Throughput: total bytes / total time. Bytes per beat is data_width/8.
+    # Throughput in **bits per second** (the schema field is `read_bps`
+    # / `write_bps` — bps, not Bps). Total bytes / total time, then
+    # ×8 for the bits/byte conversion. Bytes per beat is data_width/8.
     bytes_per_beat = max(acc.bundle.data_width // 8, 1)
     read_bytes = acc.read_beats * bytes_per_beat
     write_bytes = acc.write_beats * bytes_per_beat
     elapsed_s = max(acc.read_max_t_fs, acc.write_max_t_fs) / 1e15
     if elapsed_s > 0:
-        bundle_stats.read_bps = read_bytes / elapsed_s
-        bundle_stats.write_bps = write_bytes / elapsed_s
+        bundle_stats.read_bps = (read_bytes * 8) / elapsed_s
+        bundle_stats.write_bps = (write_bytes * 8) / elapsed_s
 
     bundle_stats.read_peak = acc.read_outstanding_peak
     bundle_stats.read_avg = (
