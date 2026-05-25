@@ -1277,6 +1277,7 @@ notebook = [
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow" },
+    { name = "websockets" },
 ]
 parquet = [
     { name = "pyarrow" },
@@ -1315,6 +1316,7 @@ requires-dist = [
     { name = "pywellen", specifier = ">=0.20.5" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.25.1" },
+    { name = "websockets", marker = "extra == 'notebook'", specifier = ">=12" },
 ]
 provides-extras = ["fst", "verible", "parquet", "notebook"]
 

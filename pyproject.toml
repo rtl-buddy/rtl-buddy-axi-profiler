@@ -48,6 +48,10 @@ notebook = [
     # types). Polars covers our actual data ops; pandas just keeps
     # altair happy without forcing the user to install it manually.
     "pandas>=2",
+    # Phase 3 SPA↔notebook sync: the template's optional sync helper
+    # joins rtl-buddy-hub's /api/events/sync broker (rtl_buddy#208)
+    # when ``RB_HUB_EVENTS_URL`` is set in the environment.
+    "websockets>=12",
 ]
 
 [project.scripts]
