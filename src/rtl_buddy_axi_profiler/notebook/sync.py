@@ -113,7 +113,7 @@ class EventSync:
 
     async def _main(self) -> None:
         try:
-            import websockets
+            import websockets  # type: ignore[import-not-found]
         except ImportError:
             logger.warning("event-sync disabled: install `websockets` package")
             return
