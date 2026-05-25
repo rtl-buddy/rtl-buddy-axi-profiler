@@ -17,7 +17,13 @@ the rest of the cells, so changing one filter reflows the others.
 
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["marimo>=0.9", "altair>=5", "polars>=1.0", "pyarrow>=14"]
+# dependencies = [
+#   "marimo>=0.9",
+#   "altair>=5",
+#   "polars>=1.0",
+#   "pyarrow>=14",
+#   "websockets>=12",
+# ]
 # ///
 
 import marimo
@@ -75,9 +81,74 @@ def _(df, mo):
 
 
 @app.cell(hide_code=True)
-def _(bundle_dd):
-    selected_bundle = None if bundle_dd.value == "(all)" else bundle_dd.value
+def _():
+    """Singleton sync handle. ``None`` when ``$RB_HUB_EVENTS_URL`` is
+    unset — the rest of the notebook degrades to standalone."""
+    from rtl_buddy_axi_profiler.notebook.sync import from_env
+
+    sync = from_env()
+    return (sync,)
+
+
+@app.cell(hide_code=True)
+def _(mo, sync):
+    """Tick the sync-poller every 500 ms when connected.
+
+    Polling (vs. cross-thread ``mo.state`` setters) keeps the bridge
+    between the background WS thread and marimo's reactive loop
+    boring. No-op cell when ``sync`` is ``None``."""
+    if sync is None:
+        refresher = None
+    else:
+        refresher = mo.ui.refresh(default_interval="500ms")
+        refresher
+    return (refresher,)
+
+
+@app.cell(hide_code=True)
+def _(refresher, sync):
+    """Pull the latest inbound selection from the broker."""
+    if sync is None or refresher is None:
+        spa_selection = None
+    else:
+        refresher  # depend on the tick
+        _, spa_selection = sync.latest_selection
+    return (spa_selection,)
+
+
+@app.cell(hide_code=True)
+def _(bundle_dd, spa_selection):
+    """SPA-driven selection wins when present and known to this parquet."""
+    if spa_selection and isinstance(spa_selection, dict):
+        bundle_from_spa = spa_selection.get("bundle")
+        if bundle_from_spa and bundle_from_spa in bundle_dd.options:
+            selected_bundle = bundle_from_spa
+        else:
+            selected_bundle = None if bundle_dd.value == "(all)" else bundle_dd.value
+    else:
+        selected_bundle = None if bundle_dd.value == "(all)" else bundle_dd.value
     return (selected_bundle,)
+
+
+@app.cell(hide_code=True)
+def _(mo, sync):
+    """Time-window publisher — pushes a ``time-window`` envelope to
+    the SPA when the user enters start/end and clicks publish.
+
+    A future PR can replace this with brush state harvested from
+    an altair chart; this manual form is enough to prove the
+    notebook→SPA path end-to-end."""
+    publish_btn = None
+    if sync is not None:
+        t_start = mo.ui.number(value=0, label="t_start_fs")
+        t_end = mo.ui.number(value=0, label="t_end_fs")
+
+        def _publish(_value):
+            sync.publish_time_window(int(t_start.value), int(t_end.value))
+
+        publish_btn = mo.ui.button(label="publish window to SPA", on_click=_publish)
+        mo.hstack([t_start, t_end, publish_btn])
+    return (publish_btn,)
 
 
 @app.cell(hide_code=True)
