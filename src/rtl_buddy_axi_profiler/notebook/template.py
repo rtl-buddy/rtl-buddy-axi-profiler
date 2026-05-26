@@ -131,27 +131,6 @@ def _(bundle_dd, spa_selection):
 
 
 @app.cell(hide_code=True)
-def _(mo, sync):
-    """Time-window publisher — pushes a ``time-window`` envelope to
-    the SPA when the user enters start/end and clicks publish.
-
-    A future PR can replace this with brush state harvested from
-    an altair chart; this manual form is enough to prove the
-    notebook→SPA path end-to-end."""
-    publish_btn = None
-    if sync is not None:
-        t_start = mo.ui.number(value=0, label="t_start_fs")
-        t_end = mo.ui.number(value=0, label="t_end_fs")
-
-        def _publish(_value):
-            sync.publish_time_window(int(t_start.value), int(t_end.value))
-
-        publish_btn = mo.ui.button(label="publish window to SPA", on_click=_publish)
-        mo.hstack([t_start, t_end, publish_btn])
-    return (publish_btn,)
-
-
-@app.cell(hide_code=True)
 def _(df, mo):
     """Downsample warning when full timeline / outstanding-depth
     would be slow to render."""
@@ -171,10 +150,33 @@ def _(df, mo):
 
 
 @app.cell(hide_code=True)
-def _(df, selected_bundle):
+def _(df, mo, selected_bundle):
+    """Brushable timeline. Wrapped in ``mo.ui.altair_chart`` so the
+    interval selection is reactive — the publisher cell below reads
+    ``timeline_chart.value`` (rows under the brush) and pushes the
+    span to the SPA as a ``time-window`` envelope."""
     from rtl_buddy_axi_profiler.notebook.plots import timeline
 
-    timeline(df, bundle=selected_bundle)
+    timeline_chart = mo.ui.altair_chart(timeline(df, bundle=selected_bundle))
+    timeline_chart
+    return (timeline_chart,)
+
+
+@app.cell(hide_code=True)
+def _(sync, timeline_chart):
+    """Push the brush span to the SPA whenever the user adjusts it.
+
+    ``mo.ui.altair_chart(...).value`` is the dataframe of rows that
+    fall inside the brush. Empty (or ``None``) means no active
+    selection — nothing to publish. The notebook→SPA wire carries
+    femtoseconds, and the parquet stores picoseconds, so we convert
+    at the boundary (1 ps = 1000 fs)."""
+    if sync is not None and timeline_chart.value is not None:
+        rows = timeline_chart.value
+        if len(rows) > 0:
+            lo_ps = float(rows["t_start_ps"].min())
+            hi_ps = float(rows["t_end_ps"].max())
+            sync.publish_time_window(int(lo_ps * 1000), int(hi_ps * 1000))
     return
 
 

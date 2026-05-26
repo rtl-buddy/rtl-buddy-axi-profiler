@@ -31,6 +31,20 @@ def test_template_is_valid_python() -> None:
     compile(TEMPLATE.read_text(), str(TEMPLATE), "exec")
 
 
+def test_template_uses_brush_chart_for_time_window_publish() -> None:
+    """Brush-state publisher contract: the timeline cell wraps its
+    chart in ``mo.ui.altair_chart`` (so the brush is reactive) and a
+    downstream cell calls ``sync.publish_time_window`` from the
+    chart's selected rows. Guards against accidental revert to the
+    manual ``mo.ui.number + button`` form that this replaced."""
+    body = TEMPLATE.read_text()
+    assert "mo.ui.altair_chart" in body, "timeline must be brush-wrapped"
+    assert "sync.publish_time_window" in body, "brush must drive the publisher"
+    assert "publish window to SPA" not in body, (
+        "manual time-window form should be gone"
+    )
+
+
 def test_template_exports_via_marimo_cli() -> None:
     """`marimo export --to script` is the bare-minimum sanity check:
     parses the file, walks the cells, emits a flat .py. If a cell
