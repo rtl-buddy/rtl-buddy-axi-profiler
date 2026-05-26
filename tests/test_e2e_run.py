@@ -94,3 +94,34 @@ def test_single_master_fixture_has_realistic_latency_distribution() -> None:
     throughput = bundles[0]["throughput"]
     assert throughput["read_bps"] > 0, "read throughput should be non-zero"
     assert throughput["write_bps"] > 0, "write throughput should be non-zero"
+
+
+def test_out_of_order_fixture_reconstructs_all_eight_txns() -> None:
+    """The out_of_order fixture issues 8 reads + 8 writes with unique
+    IDs and scrambled responses — the reconstruct stage must match
+    every (AR, R) and (AW, B) pair across the pending table. A
+    regression in the matching path would drop one or more txns and
+    collapse the histogram below 8 samples per direction."""
+    golden = json.loads((FIXTURES_ROOT / "out_of_order" / GOLDEN_NAME).read_text())
+    ar_hist = golden["bundles"][0]["latency_cycles"]["ar_to_r_first"]["hist_log2"]
+    aw_hist = golden["bundles"][0]["latency_cycles"]["aw_to_b"]["hist_log2"]
+    assert sum(ar_hist) == 8, (
+        f"expected 8 read latencies, got {sum(ar_hist)} (pending table regression?)"
+    )
+    assert sum(aw_hist) == 8, (
+        f"expected 8 write latencies, got {sum(aw_hist)} (pending table regression?)"
+    )
+
+
+def test_out_of_order_truth_table_is_present() -> None:
+    """The expected_latencies.txt truth table must ship next to the
+    fixture per #31's acceptance — it's the reviewer's sanity check
+    against the pipeline's reconstruction."""
+    truth = FIXTURES_ROOT / "out_of_order" / "expected_latencies.txt"
+    assert truth.exists(), "expected_latencies.txt missing from out_of_order fixture"
+    text = truth.read_text()
+    # 8 reads + 8 writes documented, one line each (plus header lines).
+    r_lines = [ln for ln in text.splitlines() if ln.startswith("R ")]
+    b_lines = [ln for ln in text.splitlines() if ln.startswith("B ")]
+    assert len(r_lines) == 8, r_lines
+    assert len(b_lines) == 8, b_lines
