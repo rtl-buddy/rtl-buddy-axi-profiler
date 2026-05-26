@@ -20,12 +20,17 @@ class _SigDecl:
 def _id_codes():
     """Yield printable ASCII codes for VCD signal ids.
 
-    VCD ID codes are printable ASCII, 33-126 inclusive. One char
-    gives 94 unique codes — enough for any AXI fixture we build
-    by hand.
+    VCD ID codes are printable ASCII, 33-126 inclusive. Single-char
+    gives 94 ids — enough for single-bundle fixtures (~24 signals).
+    For multi-bundle fixtures (crossbar_2x2 hits 96+) we fall through
+    to two-char codes, then three-char if ever needed. VCD spec
+    allows any-length printable ASCII identifiers.
     """
     for code in range(33, 127):
         yield chr(code)
+    for a in range(33, 127):
+        for b in range(33, 127):
+            yield chr(a) + chr(b)
 
 
 class VcdWriter:

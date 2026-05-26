@@ -120,8 +120,44 @@ def test_out_of_order_truth_table_is_present() -> None:
     truth = FIXTURES_ROOT / "out_of_order" / "expected_latencies.txt"
     assert truth.exists(), "expected_latencies.txt missing from out_of_order fixture"
     text = truth.read_text()
-    # 8 reads + 8 writes documented, one line each (plus header lines).
     r_lines = [ln for ln in text.splitlines() if ln.startswith("R ")]
     b_lines = [ln for ln in text.splitlines() if ln.startswith("B ")]
     assert len(r_lines) == 8, r_lines
     assert len(b_lines) == 8, b_lines
+
+
+def test_crossbar_rollup_matches_member_sum() -> None:
+    """Acceptance gate from #31: each interconnect node's
+    ``total_read_bps`` + ``total_write_bps`` equal the sum of its
+    contributing bundles' ``read_bps`` / ``write_bps`` within 0.1%.
+    A regression in the rollup math would either drop a member or
+    miscount one — both visible here."""
+    golden = json.loads((FIXTURES_ROOT / "crossbar_2x2" / GOLDEN_NAME).read_text())
+    by_slave: dict[str, list[dict]] = {}
+    for b in golden["bundles"]:
+        by_slave.setdefault(b["slave_path"], []).append(b)
+
+    interconnects = {ic["node_path"]: ic for ic in golden["interconnects"]}
+    assert len(interconnects) == 2, (
+        "crossbar should produce 2 interconnect nodes (one per slave)"
+    )
+
+    for slave, members in by_slave.items():
+        if len(members) < 2:
+            continue  # Only multi-master slaves get rollups.
+        ic = interconnects[slave]
+        member_r = sum(m["throughput"]["read_bps"] for m in members)
+        member_w = sum(m["throughput"]["write_bps"] for m in members)
+        # ``read_bps`` is a float; 0.1% relative tolerance per the
+        # acceptance criteria. Exact match expected in practice
+        # because the rollup is a straight sum.
+        rel_r = abs(ic["total_read_bps"] - member_r) / max(member_r, 1.0)
+        rel_w = abs(ic["total_write_bps"] - member_w) / max(member_w, 1.0)
+        assert rel_r < 0.001, (
+            f"{slave}.total_read_bps={ic['total_read_bps']} != sum of members "
+            f"({member_r}); rel diff {rel_r * 100:.3f}%"
+        )
+        assert rel_w < 0.001, (
+            f"{slave}.total_write_bps={ic['total_write_bps']} != sum of members "
+            f"({member_w}); rel diff {rel_w * 100:.3f}%"
+        )
