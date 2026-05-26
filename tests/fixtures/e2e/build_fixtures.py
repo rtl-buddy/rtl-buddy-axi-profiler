@@ -161,11 +161,142 @@ def build_errors() -> None:
     _write_golden(fixture_dir, manifest)
 
 
+# --- single_master_single_slave fixture ------------------------------------
+
+
+def build_single_master_single_slave() -> None:
+    """Minimal CPU→DRAM bundle exercising real percentile + throughput
+    statistics. 100 reads + 100 writes = 200 txns total; AR→R latency
+    cycles through (2, 3, 4, 5) so p50 ≠ p99; AW→B cycles through
+    (3, 5, 7, 9). 5% of each direction returns SLVERR / DECERR so the
+    error counts are non-zero but small.
+
+    Lifts the txn-layer reconstruct + aggregate unit tests up to the
+    FST→JSON layer in the most boring possible topology: one master,
+    one slave, no hierarchy.
+    """
+    fixture_dir = FIXTURES_ROOT / "single_master_single_slave"
+    fixture_dir.mkdir(exist_ok=True)
+
+    spec = BundleSpec(
+        name="cpu_to_dram",
+        master_path="top.u_cpu",
+        slave_path="top.u_dram",
+        clock_signal="top.clk",
+    )
+    manifest = manifest_from([spec], design_top="top")
+
+    n_reads = 100
+    n_writes = 100
+    ar_latencies = (2, 3, 4, 5)
+    aw_latencies = (3, 5, 7, 9)
+    # Cycle stride: enough room between txn starts to avoid AR/AW
+    # collisions across the (variable) latency tails.
+    read_stride = 8
+    write_stride = 12
+    read_base_cycle = 5
+    write_base_cycle = read_base_cycle + n_reads * read_stride + 10
+    end_cycle = write_base_cycle + n_writes * write_stride + max(aw_latencies) + 5
+
+    posedges = end_cycle + 5
+    half = 5
+    w = VcdWriter(timescale="1ns")
+    emit_clock(w, path="top.clk", posedges=posedges)
+    declare_bundle_signals(w, spec)
+    initialize_bundle_zero(w, spec)
+
+    sigp = f"top.u_cpu.{spec.signal_prefix}"
+
+    def _at(c: int) -> int:
+        return (2 * c - 1) * half
+
+    def _after(c: int) -> int:
+        return (2 * c + 1) * half
+
+    # --- reads ---
+    for i in range(n_reads):
+        cycle_ar = read_base_cycle + i * read_stride
+        latency = ar_latencies[i % len(ar_latencies)]
+        cycle_r = cycle_ar + latency
+        txn_id = i % 16
+        # Error injection: every 20th txn alternates SLVERR / DECERR.
+        if i % 40 == 0:
+            resp = 2  # SLVERR
+        elif i % 40 == 20:
+            resp = 3  # DECERR
+        else:
+            resp = 0
+
+        t = _at(cycle_ar)
+        w.change(t, f"{sigp}arvalid", 1)
+        w.change(t, f"{sigp}arready", 1)
+        w.change(t, f"{sigp}arid", txn_id)
+        w.change(t, f"{sigp}araddr", 0x1000 + i * 64)
+        w.change(_after(cycle_ar), f"{sigp}arvalid", 0)
+        w.change(_after(cycle_ar), f"{sigp}arready", 0)
+
+        t = _at(cycle_r)
+        w.change(t, f"{sigp}rvalid", 1)
+        w.change(t, f"{sigp}rready", 1)
+        w.change(t, f"{sigp}rid", txn_id)
+        w.change(t, f"{sigp}rresp", resp)
+        w.change(t, f"{sigp}rlast", 1)
+        w.change(_after(cycle_r), f"{sigp}rvalid", 0)
+        w.change(_after(cycle_r), f"{sigp}rready", 0)
+        w.change(_after(cycle_r), f"{sigp}rlast", 0)
+        if resp != 0:
+            w.change(_after(cycle_r), f"{sigp}rresp", 0)
+
+    # --- writes ---
+    for i in range(n_writes):
+        cycle_aw = write_base_cycle + i * write_stride
+        latency = aw_latencies[i % len(aw_latencies)]
+        cycle_b = cycle_aw + latency
+        txn_id = i % 16
+        if i % 40 == 0:
+            resp = 2  # SLVERR
+        elif i % 40 == 20:
+            resp = 3  # DECERR
+        else:
+            resp = 0
+
+        t = _at(cycle_aw)
+        w.change(t, f"{sigp}awvalid", 1)
+        w.change(t, f"{sigp}awready", 1)
+        w.change(t, f"{sigp}awid", txn_id)
+        w.change(t, f"{sigp}awaddr", 0x4000 + i * 64)
+        w.change(_after(cycle_aw), f"{sigp}awvalid", 0)
+        w.change(_after(cycle_aw), f"{sigp}awready", 0)
+
+        t = _at(cycle_aw + 1)
+        w.change(t, f"{sigp}wvalid", 1)
+        w.change(t, f"{sigp}wready", 1)
+        w.change(t, f"{sigp}wlast", 1)
+        w.change(_after(cycle_aw + 1), f"{sigp}wvalid", 0)
+        w.change(_after(cycle_aw + 1), f"{sigp}wready", 0)
+        w.change(_after(cycle_aw + 1), f"{sigp}wlast", 0)
+
+        t = _at(cycle_b)
+        w.change(t, f"{sigp}bvalid", 1)
+        w.change(t, f"{sigp}bready", 1)
+        w.change(t, f"{sigp}bid", txn_id)
+        w.change(t, f"{sigp}bresp", resp)
+        w.change(_after(cycle_b), f"{sigp}bvalid", 0)
+        w.change(_after(cycle_b), f"{sigp}bready", 0)
+        if resp != 0:
+            w.change(_after(cycle_b), f"{sigp}bresp", 0)
+
+    write_vcd(w, fixture_dir)
+    write_manifest(manifest, fixture_dir)
+    _write_golden(fixture_dir, manifest)
+
+
 # --- driver ----------------------------------------------------------------
 
 
 FIXTURE_BUILDERS: list[tuple[str, Callable[[], None]]] = [
     ("errors", build_errors),
+    ("single_master_single_slave", build_single_master_single_slave),
 ]
 
 
