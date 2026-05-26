@@ -43,6 +43,18 @@ def test_template_uses_brush_chart_for_time_window_publish() -> None:
     assert "publish window to SPA" not in body, "manual time-window form should be gone"
 
 
+def test_template_surfaces_spa_divergence() -> None:
+    """When the SPA selects a bundle this parquet doesn't carry, the
+    notebook must render a divergence callout — not silently fall
+    back. We string-check for the wired-in callout to guard against
+    accidental removal."""
+    body = TEMPLATE.read_text()
+    assert "not present in" in body, "divergence callout text missing"
+    assert "not in bundle_dd.options" in body, (
+        "divergence detector should fire on bundles missing from this parquet"
+    )
+
+
 def test_template_exports_via_marimo_cli() -> None:
     """`marimo export --to script` is the bare-minimum sanity check:
     parses the file, walks the cells, emits a flat .py. If a cell

@@ -131,6 +131,29 @@ def _(bundle_dd, spa_selection):
 
 
 @app.cell(hide_code=True)
+def _(bundle_dd, mo, spa_selection):
+    """Surface SPA→notebook divergence.
+
+    Without this, an SPA click on a bundle that this parquet doesn't
+    carry silently falls back to the dropdown — indistinguishable
+    from "the wire is broken" or "the user mis-clicked". A callout
+    here at least tells them which bundle the SPA *thought* they
+    wanted and that the notebook stayed on its own selection."""
+    if spa_selection and isinstance(spa_selection, dict):
+        _missing = spa_selection.get("bundle")
+        if _missing and _missing not in bundle_dd.options:
+            mo.callout(
+                mo.md(
+                    f"SPA selected **`{_missing}`** — not present in "
+                    f"this parquet. Showing dropdown selection "
+                    f"(`{bundle_dd.value}`) instead."
+                ),
+                kind="warn",
+            )
+    return
+
+
+@app.cell(hide_code=True)
 def _(df, mo):
     """Downsample warning when full timeline / outstanding-depth
     would be slow to render."""
