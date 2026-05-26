@@ -1282,6 +1282,9 @@ notebook = [
 parquet = [
     { name = "pyarrow" },
 ]
+verible = [
+    { name = "rtl-buddy-view" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1315,6 +1318,7 @@ requires-dist = [
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=14" },
     { name = "pywellen", specifier = ">=0.20.5" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rtl-buddy-view", marker = "extra == 'verible'", git = "https://github.com/rtl-buddy/rtl-buddy-view.git?tag=v0.2.0" },
     { name = "typer", specifier = ">=0.25.1" },
     { name = "websockets", marker = "extra == 'notebook'", specifier = ">=12" },
 ]
@@ -1338,6 +1342,15 @@ lint = [
 test = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=5.0" },
+]
+
+[[package]]
+name = "rtl-buddy-view"
+version = "0.2.0"
+source = { git = "https://github.com/rtl-buddy/rtl-buddy-view.git?tag=v0.2.0#1bef422ae73d49ab48201fa0cd80420c6c27016e" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "typer" },
 ]
 
 [[package]]

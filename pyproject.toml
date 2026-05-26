@@ -24,8 +24,13 @@ dependencies = [
 #            Tentative pick (pyfst vs pylibfst) decided in #3 once we
 #            benchmark on the 1 GB fixture.
 # [verible]: used by stages/discover/verible.py — see issue #2.
-#            Profiler links libverible directly (no rtl_buddy dep);
-#            final binding name confirmed in #2.
+#            Depends on rtl-buddy-view for the shared CST cache
+#            (content-hash keyed under <xdg-cache>/rtl-buddy/sv-cst/)
+#            promoted to public API in view #109; see axi-profiler
+#            #34. We still own binary location (vendored under our
+#            own vendor/verible/ path); view's get_or_compute handles
+#            the cache. Pin <0.3 because the public surface landed
+#            in 0.2.0 — re-pin on the next minor as needed.
 # [parquet]: used by stages/emit/txns_parquet_v1.py — see issue #17.
 #            Drives the per-transaction parquet artifact that the
 #            marimo notebook drill-down (umbrella #16) consumes.
@@ -36,7 +41,7 @@ dependencies = [
 #            zoom/brush snappy on the row counts we expect.
 [project.optional-dependencies]
 fst = []
-verible = []
+verible = ["rtl-buddy-view>=0.2.0,<0.3"]
 parquet = ["pyarrow>=14"]
 notebook = [
     "marimo>=0.9",
@@ -82,6 +87,14 @@ dev = [
     { include-group = "test" },
 ]
 
+# rtl-buddy-view isn't on PyPI; resolve the [verible] extra's pin
+# from the GitHub release tag instead. Downstream consumers (the
+# project template, dev worktrees) can override this with their own
+# [tool.uv.sources] block — e.g. ``path = "../rtl-buddy-view"`` for
+# editable cross-repo dev.
+[tool.uv.sources]
+rtl-buddy-view = { git = "https://github.com/rtl-buddy/rtl-buddy-view.git", tag = "v0.2.0" }
+
 [tool.ruff]
 line-length = 88
 target-version = "py312"
@@ -118,4 +131,12 @@ ignore_missing_imports = true
 # the package imports without them installed.
 [[tool.mypy.overrides]]
 module = ["marimo", "altair", "polars", "pandas"]
+ignore_missing_imports = true
+
+# rtl-buddy-view ships type hints in its own modules but lives under
+# the [verible] extra. Same lint-doesn't-install-extras pattern as
+# the others — the _verible wrapper guards its import behind a
+# try/except so the rest of the package doesn't drag view in.
+[[tool.mypy.overrides]]
+module = ["rtl_buddy_view.cst_cache"]
 ignore_missing_imports = true
