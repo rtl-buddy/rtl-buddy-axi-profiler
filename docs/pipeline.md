@@ -61,6 +61,10 @@ axi-profiler run --filelist f --top X --ingest stream -i foo.axis -o axi-perf.js
 
 All three are locked at v1.0; additive evolution only post-v1.
 
+## Path-specific docs
+
+- [`fst-pipeline.md`](fst-pipeline.md) — wellen-backed FST/VCD ingest path: signal-naming gotchas, posedge sampling model, measured runtime budget, and the canonical trust-set fixtures under `tests/fixtures/e2e/`.
+
 ## Cross-repo coupling
 
 This pipeline's outputs feed three downstream consumers:
