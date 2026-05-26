@@ -1,0 +1,455 @@
+{
+  "schema_version": "1.0",
+  "tool": "rtl-buddy-axi-profiler",
+  "tool_version": "golden",
+  "produced_at": "1970-01-01T00:00:00Z",
+  "design_top": "top",
+  "duration_cycles": 1620,
+  "clock_period_ns": 10.0,
+  "bundles": [
+    {
+      "name": "cpu0_to_mem0",
+      "master_path": "top.u_xbar.iface_cpu0_mem0",
+      "slave_path": "top.u_mem0",
+      "protocol": "AXI4",
+      "data_width": 64,
+      "id_width": 4,
+      "default_view": "parent",
+      "channels": {
+        "ar": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "aw": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "r": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "w": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "b": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        }
+      },
+      "throughput": {
+        "read_bps": 618357487.9227053,
+        "write_bps": 618357487.9227053
+      },
+      "outstanding": {
+        "read_peak": 1,
+        "read_avg": 1.0,
+        "write_peak": 1,
+        "write_avg": 1.0
+      },
+      "latency_cycles": {
+        "ar_to_r_first": {
+          "p50": 20000000,
+          "p95": 20000000,
+          "p99": 20000000,
+          "max": 20000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            30
+          ]
+        },
+        "aw_to_b": {
+          "p50": 40000000,
+          "p95": 40000000,
+          "p99": 40000000,
+          "max": 40000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            30
+          ]
+        }
+      },
+      "errors": {
+        "slverr": 0,
+        "decerr": 0
+      }
+    },
+    {
+      "name": "cpu1_to_mem0",
+      "master_path": "top.u_xbar.iface_cpu1_mem0",
+      "slave_path": "top.u_mem0",
+      "protocol": "AXI4",
+      "data_width": 64,
+      "id_width": 4,
+      "default_view": "parent",
+      "channels": {
+        "ar": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "aw": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "r": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "w": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "b": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        }
+      },
+      "throughput": {
+        "read_bps": 125367286.97355533,
+        "write_bps": 125367286.97355533
+      },
+      "outstanding": {
+        "read_peak": 1,
+        "read_avg": 1.0,
+        "write_peak": 1,
+        "write_avg": 1.0
+      },
+      "latency_cycles": {
+        "ar_to_r_first": {
+          "p50": 20000000,
+          "p95": 20000000,
+          "p99": 20000000,
+          "max": 20000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            10
+          ]
+        },
+        "aw_to_b": {
+          "p50": 40000000,
+          "p95": 40000000,
+          "p99": 40000000,
+          "max": 40000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            10
+          ]
+        }
+      },
+      "errors": {
+        "slverr": 0,
+        "decerr": 0
+      }
+    },
+    {
+      "name": "cpu0_to_mem1",
+      "master_path": "top.u_xbar.iface_cpu0_mem1",
+      "slave_path": "top.u_mem1",
+      "protocol": "AXI4",
+      "data_width": 64,
+      "id_width": 4,
+      "default_view": "parent",
+      "channels": {
+        "ar": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "aw": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "r": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "w": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "b": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        }
+      },
+      "throughput": {
+        "read_bps": 126669965.36368133,
+        "write_bps": 126669965.36368133
+      },
+      "outstanding": {
+        "read_peak": 1,
+        "read_avg": 1.0,
+        "write_peak": 1,
+        "write_avg": 1.0
+      },
+      "latency_cycles": {
+        "ar_to_r_first": {
+          "p50": 20000000,
+          "p95": 20000000,
+          "p99": 20000000,
+          "max": 20000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            20
+          ]
+        },
+        "aw_to_b": {
+          "p50": 40000000,
+          "p95": 40000000,
+          "p99": 40000000,
+          "max": 40000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            20
+          ]
+        }
+      },
+      "errors": {
+        "slverr": 0,
+        "decerr": 0
+      }
+    },
+    {
+      "name": "cpu1_to_mem1",
+      "master_path": "top.u_xbar.iface_cpu1_mem1",
+      "slave_path": "top.u_mem1",
+      "protocol": "AXI4",
+      "data_width": 64,
+      "id_width": 4,
+      "default_view": "parent",
+      "channels": {
+        "ar": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "aw": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "r": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "w": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "b": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        }
+      },
+      "throughput": {
+        "read_bps": 70562293.27453142,
+        "write_bps": 70562293.27453142
+      },
+      "outstanding": {
+        "read_peak": 1,
+        "read_avg": 1.0,
+        "write_peak": 1,
+        "write_avg": 1.0
+      },
+      "latency_cycles": {
+        "ar_to_r_first": {
+          "p50": 20000000,
+          "p95": 20000000,
+          "p99": 20000000,
+          "max": 20000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            15
+          ]
+        },
+        "aw_to_b": {
+          "p50": 40000000,
+          "p95": 40000000,
+          "p99": 40000000,
+          "max": 40000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            15
+          ]
+        }
+      },
+      "errors": {
+        "slverr": 0,
+        "decerr": 0
+      }
+    }
+  ],
+  "interconnects": [
+    {
+      "node_path": "top.u_mem0",
+      "total_read_bps": 743724774.8962606,
+      "total_write_bps": 743724774.8962606,
+      "hottest_master": "top.u_xbar.iface_cpu0_mem0",
+      "hottest_slave": "top.u_mem0",
+      "arbitration": {
+        "fairness_jain": 0.6947378120133789,
+        "starved_masters": []
+      }
+    },
+    {
+      "node_path": "top.u_mem1",
+      "total_read_bps": 197232258.63821274,
+      "total_write_bps": 197232258.63821274,
+      "hottest_master": "top.u_xbar.iface_cpu0_mem1",
+      "hottest_slave": "top.u_mem1",
+      "arbitration": {
+        "fairness_jain": 0.925132625860122,
+        "starved_masters": []
+      }
+    }
+  ]
+}

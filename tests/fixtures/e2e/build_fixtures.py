@@ -448,6 +448,151 @@ def _write_expected_latencies(fixture_dir: Path) -> None:
     (fixture_dir / "expected_latencies.txt").write_text("\n".join(lines) + "\n")
 
 
+# --- crossbar_2x2 fixture --------------------------------------------------
+
+
+_XBAR_PAIRS: list[dict] = [
+    {
+        "name": "cpu0_to_mem0",
+        "master_path": "top.u_xbar.iface_cpu0_mem0",
+        "slave_path": "top.u_mem0",
+        "n_reads": 30,
+        "n_writes": 30,
+    },
+    {
+        "name": "cpu1_to_mem0",
+        "master_path": "top.u_xbar.iface_cpu1_mem0",
+        "slave_path": "top.u_mem0",
+        "n_reads": 10,
+        "n_writes": 10,
+    },
+    {
+        "name": "cpu0_to_mem1",
+        "master_path": "top.u_xbar.iface_cpu0_mem1",
+        "slave_path": "top.u_mem1",
+        "n_reads": 20,
+        "n_writes": 20,
+    },
+    {
+        "name": "cpu1_to_mem1",
+        "master_path": "top.u_xbar.iface_cpu1_mem1",
+        "slave_path": "top.u_mem1",
+        "n_reads": 15,
+        "n_writes": 15,
+    },
+]
+
+
+def build_crossbar_2x2() -> None:
+    """2 masters × 2 slaves through a crossbar: four bundles sharing
+    two memory endpoints. Each bundle drives an asymmetric txn count
+    so the interconnect rollup's ``hottest_master`` and
+    ``fairness_jain`` are meaningful, and the acceptance gate from
+    #31 holds: each interconnect node's ``total_read_bps`` equals
+    the sum of its contributing bundles' ``read_bps`` (locked by
+    ``test_crossbar_rollup_matches_member_sum``).
+
+    Per-bundle traffic:
+    - cpu0 → mem0: 30 reads + 30 writes (hot path)
+    - cpu1 → mem0: 10 + 10
+    - cpu0 → mem1: 20 + 20
+    - cpu1 → mem1: 15 + 15
+
+    Bundles use distinct ``master_path`` prefixes under
+    ``top.u_xbar.iface_*`` so each bundle's AXI signals live in its
+    own scope (no signal-name collision across bundles on shared
+    instance paths).
+    """
+    fixture_dir = FIXTURES_ROOT / "crossbar_2x2"
+    fixture_dir.mkdir(exist_ok=True)
+
+    specs = [
+        BundleSpec(
+            name=p["name"],
+            master_path=p["master_path"],
+            slave_path=p["slave_path"],
+            clock_signal="top.clk",
+        )
+        for p in _XBAR_PAIRS
+    ]
+    manifest = manifest_from(specs, design_top="top")
+
+    # Each bundle gets its own window of cycles. They share top.clk;
+    # ingest samples each bundle independently per-posedge.
+    cycles_per_pair = 400
+    posedges = cycles_per_pair * len(_XBAR_PAIRS) + 20
+    half = 5
+
+    w = VcdWriter(timescale="1ns")
+    emit_clock(w, path="top.clk", posedges=posedges)
+    for spec in specs:
+        declare_bundle_signals(w, spec)
+        initialize_bundle_zero(w, spec)
+
+    def _at(c: int) -> int:
+        return (2 * c - 1) * half
+
+    def _after(c: int) -> int:
+        return (2 * c + 1) * half
+
+    for pair_idx, (pair, spec) in enumerate(zip(_XBAR_PAIRS, specs)):
+        sigp = f"{spec.master_path}.{spec.signal_prefix}"
+        base_cycle = 5 + pair_idx * cycles_per_pair
+
+        for i in range(pair["n_reads"]):
+            cycle_ar = base_cycle + i * 4
+            cycle_r = cycle_ar + 2
+            txn_id = i % 16
+            t = _at(cycle_ar)
+            w.change(t, f"{sigp}arvalid", 1)
+            w.change(t, f"{sigp}arready", 1)
+            w.change(t, f"{sigp}arid", txn_id)
+            w.change(t, f"{sigp}araddr", 0x1000 + i * 8)
+            w.change(_after(cycle_ar), f"{sigp}arvalid", 0)
+            w.change(_after(cycle_ar), f"{sigp}arready", 0)
+
+            t = _at(cycle_r)
+            w.change(t, f"{sigp}rvalid", 1)
+            w.change(t, f"{sigp}rready", 1)
+            w.change(t, f"{sigp}rid", txn_id)
+            w.change(t, f"{sigp}rlast", 1)
+            w.change(_after(cycle_r), f"{sigp}rvalid", 0)
+            w.change(_after(cycle_r), f"{sigp}rready", 0)
+            w.change(_after(cycle_r), f"{sigp}rlast", 0)
+
+        write_base = base_cycle + pair["n_reads"] * 4 + 8
+        for i in range(pair["n_writes"]):
+            cycle_aw = write_base + i * 6
+            cycle_b = cycle_aw + 4
+            txn_id = i % 16
+            t = _at(cycle_aw)
+            w.change(t, f"{sigp}awvalid", 1)
+            w.change(t, f"{sigp}awready", 1)
+            w.change(t, f"{sigp}awid", txn_id)
+            w.change(t, f"{sigp}awaddr", 0x4000 + i * 8)
+            w.change(_after(cycle_aw), f"{sigp}awvalid", 0)
+            w.change(_after(cycle_aw), f"{sigp}awready", 0)
+
+            t = _at(cycle_aw + 1)
+            w.change(t, f"{sigp}wvalid", 1)
+            w.change(t, f"{sigp}wready", 1)
+            w.change(t, f"{sigp}wlast", 1)
+            w.change(_after(cycle_aw + 1), f"{sigp}wvalid", 0)
+            w.change(_after(cycle_aw + 1), f"{sigp}wready", 0)
+            w.change(_after(cycle_aw + 1), f"{sigp}wlast", 0)
+
+            t = _at(cycle_b)
+            w.change(t, f"{sigp}bvalid", 1)
+            w.change(t, f"{sigp}bready", 1)
+            w.change(t, f"{sigp}bid", txn_id)
+            w.change(_after(cycle_b), f"{sigp}bvalid", 0)
+            w.change(_after(cycle_b), f"{sigp}bready", 0)
+
+    write_vcd(w, fixture_dir)
+    write_manifest(manifest, fixture_dir)
+    _write_golden(fixture_dir, manifest)
+
+
 # --- driver ----------------------------------------------------------------
 
 
@@ -455,6 +600,7 @@ FIXTURE_BUILDERS: list[tuple[str, Callable[[], None]]] = [
     ("errors", build_errors),
     ("single_master_single_slave", build_single_master_single_slave),
     ("out_of_order", build_out_of_order),
+    ("crossbar_2x2", build_crossbar_2x2),
 ]
 
 
