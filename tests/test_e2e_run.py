@@ -75,3 +75,22 @@ def test_errors_fixture_locks_in_slverr_decerr_counts() -> None:
     errors = bundles[0]["errors"]
     assert errors["slverr"] == 4
     assert errors["decerr"] == 4
+
+
+def test_single_master_fixture_has_realistic_latency_distribution() -> None:
+    """The single_master_single_slave fixture sweeps AR→R latencies
+    over (2, 3, 4, 5) cycles, so p50 and max must differ — guards
+    against a regression where the percentile path collapses to a
+    single bucket."""
+    golden = json.loads(
+        (FIXTURES_ROOT / "single_master_single_slave" / GOLDEN_NAME).read_text()
+    )
+    bundles = golden["bundles"]
+    assert len(bundles) == 1
+    ar_to_r = bundles[0]["latency_cycles"]["ar_to_r_first"]
+    assert ar_to_r["max"] > ar_to_r["p50"], (
+        "p50 == max: latency distribution collapsed; check the fixture"
+    )
+    throughput = bundles[0]["throughput"]
+    assert throughput["read_bps"] > 0, "read throughput should be non-zero"
+    assert throughput["write_bps"] > 0, "write throughput should be non-zero"

@@ -1,0 +1,117 @@
+{
+  "schema_version": "1.0",
+  "tool": "rtl-buddy-axi-profiler",
+  "tool_version": "golden",
+  "produced_at": "1970-01-01T00:00:00Z",
+  "design_top": "top",
+  "duration_cycles": 2034,
+  "clock_period_ns": 10.0,
+  "bundles": [
+    {
+      "name": "cpu_to_dram",
+      "master_path": "top.u_cpu",
+      "slave_path": "top.u_dram",
+      "protocol": "AXI4",
+      "data_width": 64,
+      "id_width": 4,
+      "default_view": "parent",
+      "channels": {
+        "ar": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "aw": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        },
+        "r": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "w": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "beats": 0
+        },
+        "b": {
+          "util_pct": 0.0,
+          "bp_pct": 0.0,
+          "peak_occ": 0,
+          "txns": 0
+        }
+      },
+      "throughput": {
+        "read_bps": 318170519.5128014,
+        "write_bps": 318170519.5128014
+      },
+      "outstanding": {
+        "read_peak": 1,
+        "read_avg": 1.0,
+        "write_peak": 1,
+        "write_avg": 1.0
+      },
+      "latency_cycles": {
+        "ar_to_r_first": {
+          "p50": 35000000,
+          "p95": 50000000,
+          "p99": 50000000,
+          "max": 50000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100
+          ]
+        },
+        "aw_to_b": {
+          "p50": 60000000,
+          "p95": 90000000,
+          "p99": 90000000,
+          "max": 90000000,
+          "hist_log2": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100
+          ]
+        }
+      },
+      "errors": {
+        "slverr": 6,
+        "decerr": 4
+      }
+    }
+  ],
+  "interconnects": []
+}
