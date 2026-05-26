@@ -40,9 +40,7 @@ def test_template_uses_brush_chart_for_time_window_publish() -> None:
     body = TEMPLATE.read_text()
     assert "mo.ui.altair_chart" in body, "timeline must be brush-wrapped"
     assert "sync.publish_time_window" in body, "brush must drive the publisher"
-    assert "publish window to SPA" not in body, (
-        "manual time-window form should be gone"
-    )
+    assert "publish window to SPA" not in body, "manual time-window form should be gone"
 
 
 def test_template_exports_via_marimo_cli() -> None:
