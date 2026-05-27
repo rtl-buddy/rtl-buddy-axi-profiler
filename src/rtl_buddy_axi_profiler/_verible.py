@@ -2,6 +2,13 @@
 
 Returns the raw JSON CST. CST walking (module extraction, AXI bundle
 detection) lives in :mod:`stages.discover.verible`.
+
+The cache layer is shared with ``rtl-buddy-view`` via
+``rtl_buddy_view.cst_cache.get_or_compute`` — see axi-profiler #34
+and view #109. View owns the cache substrate (content-hash keying,
+atomic writes, XDG layout under ``<xdg-cache>/rtl-buddy/sv-cst/``);
+we still own binary location (our ``vendor/verible/`` install path
+differs from view's).
 """
 
 from __future__ import annotations
@@ -44,10 +51,29 @@ def parse_to_json(path: Path, *, binary: Path | None = None) -> dict:
 
     Returns the parsed JSON tree for the file. Raises
     :class:`VeribleParseError` on syntax errors or empty output.
+
+    Cache hits skip the subprocess entirely — view's
+    ``cst_cache.get_or_compute`` keys on ``(verible-version,
+    content-sha256)`` so re-parsing the same file across this tool
+    and ``rtl-buddy-view`` in the same project is a single Verible
+    invocation, not two.
     """
     bin_path = binary or locate_binary()
+    try:
+        from rtl_buddy_view.cst_cache import get_or_compute  # type: ignore[import-not-found]
+    except ImportError:
+        # rtl-buddy-view isn't installed — fall back to direct invocation.
+        # Production callers should install the [verible] extra; this
+        # path only matters when someone imports _verible without the
+        # extra (e.g. unit tests pinned to a slim dep set).
+        return _invoke_verible(bin_path, path)
+    return get_or_compute(path, verible_binary=bin_path, compute=_invoke_verible)
+
+
+def _invoke_verible(binary: Path, path: Path) -> dict:
+    """Subprocess body used as view's ``get_or_compute`` callback."""
     proc = subprocess.run(
-        [str(bin_path), "--export_json", "--printtree", str(path)],
+        [str(binary), "--export_json", "--printtree", str(path)],
         check=False,
         capture_output=True,
         text=True,

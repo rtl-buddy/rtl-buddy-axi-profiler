@@ -39,3 +39,40 @@ def test_parse_to_json_real_binary_on_minimal_module(tmp_path: Path) -> None:
     assert isinstance(tree, dict)
     # The CST root has children — non-empty is sufficient signal.
     assert "children" in tree or "tag" in tree
+
+
+def test_parse_to_json_routes_through_view_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``parse_to_json`` must delegate to view's ``get_or_compute`` so
+    the subprocess result is cached under the shared XDG namespace.
+    Stub the cache function and the subprocess body; assert the cache
+    function is the one driving the call."""
+    pytest.importorskip("rtl_buddy_view.cst_cache")
+
+    sv_file = tmp_path / "stub.sv"
+    sv_file.write_text("module m; endmodule\n")
+
+    sentinel = {"tag": "sentinel-from-view-cache"}
+    captured: dict[str, object] = {}
+
+    def fake_get_or_compute(path, *, verible_binary, compute):
+        captured["path"] = path
+        captured["binary"] = verible_binary
+        captured["compute"] = compute
+        return sentinel
+
+    from rtl_buddy_view import cst_cache
+
+    monkeypatch.setattr(cst_cache, "get_or_compute", fake_get_or_compute)
+    monkeypatch.setattr(
+        _verible, "locate_binary", lambda *a, **k: Path("/fake/verible")
+    )
+
+    result = _verible.parse_to_json(sv_file)
+    assert result is sentinel
+    assert captured["path"] == sv_file
+    assert captured["binary"] == Path("/fake/verible")
+    # The compute callback must be our subprocess body, so cache misses
+    # still invoke verible-verilog-syntax — not silently no-op.
+    assert captured["compute"] is _verible._invoke_verible
