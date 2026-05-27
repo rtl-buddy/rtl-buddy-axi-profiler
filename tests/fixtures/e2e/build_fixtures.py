@@ -291,12 +291,170 @@ def build_single_master_single_slave() -> None:
     _write_golden(fixture_dir, manifest)
 
 
+# --- out_of_order fixture --------------------------------------------------
+
+
+# (issue_cycle, response_cycle, txn_id) tuples for the out_of_order fixture.
+# Eight outstanding reads issued sequentially on cycles 5..12; responses
+# arrive in scrambled order across cycles 22..50 with non-uniform spacing.
+# Latency = response_cycle - issue_cycle; the truth table is dropped into
+# tests/fixtures/e2e/out_of_order/expected_latencies.txt for reviewer
+# sanity (acceptance gate from #31).
+_OOO_READS: tuple[tuple[int, int, int], ...] = (
+    (5, 30, 0),
+    (6, 22, 1),
+    (7, 45, 2),
+    (8, 28, 3),
+    (9, 38, 4),
+    (10, 25, 5),
+    (11, 50, 6),
+    (12, 34, 7),
+)
+_OOO_WRITES: tuple[tuple[int, int, int], ...] = (
+    (60, 88, 0),
+    (61, 78, 1),
+    (62, 95, 2),
+    (63, 82, 3),
+    (64, 92, 4),
+    (65, 75, 5),
+    (66, 100, 6),
+    (67, 86, 7),
+)
+
+
+def build_out_of_order() -> None:
+    """Interleaved AXI IDs with scrambled responses — locks in the
+    reconstruct stage's pending-table behaviour end-to-end. Per the
+    AXI4 spec the master must preserve order per ID but different
+    IDs may be reordered; this fixture issues all eight outstanding
+    reads sequentially under unique IDs, then returns them in a
+    scrambled order chosen to maximise pending-table coverage:
+    out-of-order matches, interior table positions, and the tail.
+
+    The hand-computed truth table lives next to the fixture as
+    ``expected_latencies.txt`` so a reviewer can sanity-check the
+    pipeline's reconstruction without rerunning the harness.
+    """
+    fixture_dir = FIXTURES_ROOT / "out_of_order"
+    fixture_dir.mkdir(exist_ok=True)
+
+    spec = BundleSpec(
+        name="cpu_to_mem",
+        master_path="top.u_cpu",
+        slave_path="top.u_mem",
+        clock_signal="top.clk",
+    )
+    manifest = manifest_from([spec], design_top="top")
+
+    last_cycle = max(
+        max(r[1] for r in _OOO_READS),
+        max(w[1] for w in _OOO_WRITES),
+    )
+    posedges = last_cycle + 10
+    half = 5
+
+    w = VcdWriter(timescale="1ns")
+    emit_clock(w, path="top.clk", posedges=posedges)
+    declare_bundle_signals(w, spec)
+    initialize_bundle_zero(w, spec)
+
+    sigp = f"top.u_cpu.{spec.signal_prefix}"
+
+    def _at(c: int) -> int:
+        return (2 * c - 1) * half
+
+    def _after(c: int) -> int:
+        return (2 * c + 1) * half
+
+    # Back-to-back AR issues — hold valid + ready high through the
+    # whole burst and change ``arid`` / ``araddr`` each cycle. Pulsing
+    # valid 1→0→1 at the same VCD timestamp gets read as a glitch by
+    # ``signal.value_at_time`` so the second AR collapses; holding
+    # high keeps each posedge sample as its own (valid && ready) hit.
+    first_ar_issue = min(r[0] for r in _OOO_READS)
+    last_ar_issue = max(r[0] for r in _OOO_READS)
+    w.change(_at(first_ar_issue), f"{sigp}arvalid", 1)
+    w.change(_at(first_ar_issue), f"{sigp}arready", 1)
+    for issue, _r, txn_id in _OOO_READS:
+        t = _at(issue)
+        w.change(t, f"{sigp}arid", txn_id)
+        w.change(t, f"{sigp}araddr", 0x8000 + txn_id * 16)
+    w.change(_after(last_ar_issue), f"{sigp}arvalid", 0)
+    w.change(_after(last_ar_issue), f"{sigp}arready", 0)
+
+    for _i, resp, txn_id in _OOO_READS:
+        t = _at(resp)
+        w.change(t, f"{sigp}rvalid", 1)
+        w.change(t, f"{sigp}rready", 1)
+        w.change(t, f"{sigp}rid", txn_id)
+        w.change(t, f"{sigp}rlast", 1)
+        w.change(_after(resp), f"{sigp}rvalid", 0)
+        w.change(_after(resp), f"{sigp}rready", 0)
+        w.change(_after(resp), f"{sigp}rlast", 0)
+
+    # Same back-to-back logic for AW: hold valid + ready high through
+    # the burst, change awid / awaddr each cycle.
+    first_aw_issue = min(w_[0] for w_ in _OOO_WRITES)
+    last_aw_issue = max(w_[0] for w_ in _OOO_WRITES)
+    w.change(_at(first_aw_issue), f"{sigp}awvalid", 1)
+    w.change(_at(first_aw_issue), f"{sigp}awready", 1)
+    for issue, _r, txn_id in _OOO_WRITES:
+        t = _at(issue)
+        w.change(t, f"{sigp}awid", txn_id)
+        w.change(t, f"{sigp}awaddr", 0x9000 + txn_id * 16)
+    w.change(_after(last_aw_issue), f"{sigp}awvalid", 0)
+    w.change(_after(last_aw_issue), f"{sigp}awready", 0)
+
+    # W beats follow AW by one cycle — also held high through the
+    # corresponding burst window.
+    w.change(_at(first_aw_issue + 1), f"{sigp}wvalid", 1)
+    w.change(_at(first_aw_issue + 1), f"{sigp}wready", 1)
+    w.change(_at(first_aw_issue + 1), f"{sigp}wlast", 1)
+    w.change(_after(last_aw_issue + 1), f"{sigp}wvalid", 0)
+    w.change(_after(last_aw_issue + 1), f"{sigp}wready", 0)
+    w.change(_after(last_aw_issue + 1), f"{sigp}wlast", 0)
+
+    for _i, resp, txn_id in _OOO_WRITES:
+        t = _at(resp)
+        w.change(t, f"{sigp}bvalid", 1)
+        w.change(t, f"{sigp}bready", 1)
+        w.change(t, f"{sigp}bid", txn_id)
+        w.change(_after(resp), f"{sigp}bvalid", 0)
+        w.change(_after(resp), f"{sigp}bready", 0)
+
+    write_vcd(w, fixture_dir)
+    write_manifest(manifest, fixture_dir)
+    _write_expected_latencies(fixture_dir)
+    _write_golden(fixture_dir, manifest)
+
+
+def _write_expected_latencies(fixture_dir: Path) -> None:
+    """Drop the hand-computed truth table next to the fixture.
+
+    Per #31's acceptance: a reviewer should be able to sanity-check
+    the reconstructed latencies without rerunning the pipeline.
+    """
+    lines = [
+        "# AR->R latency truth table (cycles)",
+        "# Columns: kind txn_id  issue_cycle  resp_cycle  latency_cycles",
+    ]
+    for issue, resp, txn_id in _OOO_READS:
+        lines.append(f"R  {txn_id}  {issue:3d}  {resp:3d}  {resp - issue:3d}")
+    lines.append("")
+    lines.append("# AW->B latency truth table (cycles)")
+    lines.append("# Columns: kind txn_id  issue_cycle  resp_cycle  latency_cycles")
+    for issue, resp, txn_id in _OOO_WRITES:
+        lines.append(f"B  {txn_id}  {issue:3d}  {resp:3d}  {resp - issue:3d}")
+    (fixture_dir / "expected_latencies.txt").write_text("\n".join(lines) + "\n")
+
+
 # --- driver ----------------------------------------------------------------
 
 
 FIXTURE_BUILDERS: list[tuple[str, Callable[[], None]]] = [
     ("errors", build_errors),
     ("single_master_single_slave", build_single_master_single_slave),
+    ("out_of_order", build_out_of_order),
 ]
 
 

@@ -1,0 +1,21 @@
+# AR->R latency truth table (cycles)
+# Columns: kind txn_id  issue_cycle  resp_cycle  latency_cycles
+R  0    5   30   25
+R  1    6   22   16
+R  2    7   45   38
+R  3    8   28   20
+R  4    9   38   29
+R  5   10   25   15
+R  6   11   50   39
+R  7   12   34   22
+
+# AW->B latency truth table (cycles)
+# Columns: kind txn_id  issue_cycle  resp_cycle  latency_cycles
+B  0   60   88   28
+B  1   61   78   17
+B  2   62   95   33
+B  3   63   82   19
+B  4   64   92   28
+B  5   65   75   10
+B  6   66  100   34
+B  7   67   86   19
