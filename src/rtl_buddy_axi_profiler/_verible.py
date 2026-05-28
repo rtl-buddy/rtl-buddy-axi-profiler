@@ -46,7 +46,12 @@ def locate_binary(name: str = "verible-verilog-syntax") -> Path:
     return found
 
 
-def parse_to_json(path: Path, *, binary: Path | None = None) -> dict:
+def parse_to_json(
+    path: Path,
+    *,
+    binary: Path | None = None,
+    cache_dir: Path | None = None,
+) -> dict:
     """Run ``verible-verilog-syntax --export_json --printtree`` on ``path``.
 
     Returns the parsed JSON tree for the file. Raises
@@ -57,6 +62,11 @@ def parse_to_json(path: Path, *, binary: Path | None = None) -> dict:
     content-sha256)`` so re-parsing the same file across this tool
     and ``rtl-buddy-view`` in the same project is a single Verible
     invocation, not two.
+
+    ``cache_dir`` is forwarded to view; ``None`` defers to view's
+    env/XDG default. The caller (rtl_buddy) injects the project's
+    configured cache dir per the library-boundary stance — this
+    module never reads ``root_config.yaml`` itself.
     """
     bin_path = binary or locate_binary()
     try:
@@ -67,7 +77,12 @@ def parse_to_json(path: Path, *, binary: Path | None = None) -> dict:
         # path only matters when someone imports _verible without the
         # extra (e.g. unit tests pinned to a slim dep set).
         return _invoke_verible(bin_path, path)
-    return get_or_compute(path, verible_binary=bin_path, compute=_invoke_verible)
+    return get_or_compute(
+        path,
+        verible_binary=bin_path,
+        compute=_invoke_verible,
+        cache_dir=cache_dir,
+    )
 
 
 def _invoke_verible(binary: Path, path: Path) -> dict:
