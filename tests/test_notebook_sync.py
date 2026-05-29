@@ -18,6 +18,7 @@ internal hooks directly to keep this suite hermetic.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -114,3 +115,72 @@ def test_publish_time_window_drops_when_queue_full(handle):
         except Exception:
             break
     assert len(drained) == sync_mod._OUTBOUND_MAX
+
+
+# --- inbound push hook (axi-profiler #46) --------------------------------
+
+
+@pytest.fixture
+def pushes(monkeypatch):
+    """An ``EventSync`` whose ``on_inbound`` records each push call."""
+    monkeypatch.setattr(sync_mod.EventSync, "_run_in_thread", lambda self: None)
+    calls: list[int] = []
+    handle = sync_mod.EventSync(
+        url="ws://test/api/events/sync",
+        on_inbound=lambda: calls.append(1),
+    )
+    return handle, calls
+
+
+def test_on_message_fires_push_only_for_accepted_selection(pushes):
+    handle, calls = pushes
+    handle._on_message(
+        {"topic": "selection", "data": {"bundle": "axi_xbar"}, "source": "spa"}
+    )
+    assert len(calls) == 1
+    # Self-source and unknown-topic envelopes are dropped before the
+    # push fires — the seq stays put and no re-execution is nudged.
+    handle._on_message({"topic": "selection", "data": {"x": 1}, "source": "notebook"})
+    handle._on_message({"topic": "noise", "data": {}, "source": "spa"})
+    assert len(calls) == 1
+
+
+def test_on_message_swallows_push_exception(monkeypatch):
+    """A failing push must not break message handling — the poll
+    backstop still carries the selection."""
+    monkeypatch.setattr(sync_mod.EventSync, "_run_in_thread", lambda self: None)
+
+    def boom() -> None:
+        raise RuntimeError("setter blew up")
+
+    handle = sync_mod.EventSync(url="ws://test/x", on_inbound=boom)
+    handle._on_message({"topic": "selection", "data": {"bundle": "b"}, "source": "spa"})
+    # State still updated despite the push raising.
+    seq, payload = handle.latest_selection
+    assert seq == 1 and payload == {"bundle": "b"}
+
+
+def test_from_env_passes_on_inbound(monkeypatch):
+    monkeypatch.setenv("RB_HUB_EVENTS_URL", "ws://test/api/events/sync")
+    monkeypatch.setattr(sync_mod.EventSync, "_run_in_thread", lambda self: None)
+    sentinel = object()
+    captured: dict[str, object] = {}
+    real_init = sync_mod.EventSync.__init__
+
+    def spy_init(self, url, on_inbound=None):
+        captured["on_inbound"] = on_inbound
+        real_init(self, url, on_inbound=on_inbound)
+
+    monkeypatch.setattr(sync_mod.EventSync, "__init__", spy_init)
+    sync_mod.from_env(on_inbound=sentinel)  # type: ignore[arg-type]
+    assert captured["on_inbound"] is sentinel
+
+
+def test_spawn_thread_falls_back_without_kernel_context():
+    """No marimo kernel context (CI / run-mode) → a plain daemon
+    thread, not a crash. The push then no-ops and the poll carries on."""
+    t = sync_mod._spawn_thread(lambda: None, "event-sync-test")
+    assert isinstance(t, threading.Thread)
+    assert t.daemon is True
+    assert t.name == "event-sync-test"
+    assert not t.is_alive()  # not started by the helper

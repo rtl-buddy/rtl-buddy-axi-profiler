@@ -13,3 +13,6 @@ coverage.xml
 *.swp
 .DS_Store
 vendor/
+
+# marimo's generated per-notebook layout/session cache
+__marimo__/

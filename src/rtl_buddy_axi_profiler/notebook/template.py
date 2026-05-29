@@ -81,22 +81,40 @@ def _(df, mo):
 
 
 @app.cell(hide_code=True)
-def _():
+def _(mo):
+    """Reactive seq the WS thread bumps on each inbound selection.
+
+    Reading ``get_selection_seq()`` in the consumer cell below makes
+    that cell re-run the instant the background thread calls
+    ``set_selection_seq`` — the sub-frame push path (axi-profiler #46).
+    Created once and never re-run on its own, so the seq is stable
+    across reflows."""
+    get_selection_seq, set_selection_seq = mo.state(0)
+    return get_selection_seq, set_selection_seq
+
+
+@app.cell(hide_code=True)
+def _(set_selection_seq):
     """Singleton sync handle. ``None`` when ``$RB_HUB_EVENTS_URL`` is
-    unset — the rest of the notebook degrades to standalone."""
+    unset — the rest of the notebook degrades to standalone.
+
+    The ``on_inbound`` hook bumps the reactive seq so an arriving
+    selection pushes a re-execution; under a kernel that's sub-frame,
+    elsewhere it's a no-op and the poll below takes over."""
     from rtl_buddy_axi_profiler.notebook.sync import from_env
 
-    sync = from_env()
+    sync = from_env(on_inbound=lambda: set_selection_seq(lambda v: v + 1))
     return (sync,)
 
 
 @app.cell(hide_code=True)
 def _(mo, sync):
-    """Tick the sync-poller every 500 ms when connected.
+    """Poll backstop — ticks every 500 ms when connected.
 
-    Polling (vs. cross-thread ``mo.state`` setters) keeps the bridge
-    between the background WS thread and marimo's reactive loop
-    boring. No-op cell when ``sync`` is ``None``."""
+    The ``mo.state`` push (above) handles the low-latency path under a
+    kernel; this poll is the always-correct fallback for run-mode /
+    contexts where the cross-thread setter silently no-ops. No-op cell
+    when ``sync`` is ``None``."""
     if sync is None:
         refresher = None
     else:
@@ -106,12 +124,16 @@ def _(mo, sync):
 
 
 @app.cell(hide_code=True)
-def _(refresher, sync):
-    """Pull the latest inbound selection from the broker."""
+def _(get_selection_seq, refresher, sync):
+    """Pull the latest inbound selection from the broker.
+
+    Re-runs on either trigger: the push (``get_selection_seq``, fires
+    at arrival) or the poll tick (``refresher``, ≤500 ms backstop)."""
     if sync is None or refresher is None:
         spa_selection = None
     else:
-        refresher  # depend on the tick
+        get_selection_seq()  # push: re-run at arrival
+        refresher  # poll: backstop tick
         _, spa_selection = sync.latest_selection
     return (spa_selection,)
 
