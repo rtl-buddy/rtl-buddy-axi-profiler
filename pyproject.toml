@@ -128,9 +128,12 @@ ignore_missing_imports = true
 # marimo / altair / polars / pandas live under the [notebook]
 # optional extra (same lint-doesn't-install-extras reasoning). The
 # notebook subpackage guards them at module level so the rest of
-# the package imports without them installed.
+# the package imports without them installed. ``marimo.*`` covers the
+# submodules sync.py probes for the cross-thread push path
+# (e.g. ``marimo._runtime.context.types``), which the bare ``marimo``
+# pattern would miss when the extra isn't installed.
 [[tool.mypy.overrides]]
-module = ["marimo", "altair", "polars", "pandas"]
+module = ["marimo", "marimo.*", "altair", "polars", "pandas"]
 ignore_missing_imports = true
 
 # rtl-buddy-view ships type hints in its own modules but lives under
