@@ -49,9 +49,10 @@ def test_template_surfaces_spa_divergence() -> None:
     back. We string-check for the wired-in callout to guard against
     accidental removal."""
     body = TEMPLATE.read_text()
-    assert "not present in" in body, "divergence callout text missing"
-    assert "not in bundle_dd.options" in body, (
-        "divergence detector should fire on bundles missing from this parquet"
+    assert "no matching bundle in" in body, "divergence callout text missing"
+    assert "resolve_spa_bundle(spa_selection) is None" in body, (
+        "divergence detector should fire when the SPA instance_path "
+        "resolves to no bundle in this parquet"
     )
 
 

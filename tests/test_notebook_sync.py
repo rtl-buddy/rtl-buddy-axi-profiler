@@ -48,73 +48,75 @@ def test_from_env_returns_none_for_blank_url(monkeypatch):
     assert sync_mod.from_env() is None
 
 
-def test_on_message_accepts_selection_and_bumps_seq(handle):
-    seq0, payload0 = handle.latest_selection
-    assert seq0 == 0 and payload0 is None
-
-    handle._on_message(
-        {
-            "topic": "selection",
-            "data": {"bundle": "axi_xbar", "test": "t1"},
-            "source": "spa",
-        }
-    )
-    seq1, payload1 = handle.latest_selection
-    assert seq1 == 1
-    assert payload1 == {"bundle": "axi_xbar", "test": "t1"}
-
-    handle._on_message(
-        {
-            "topic": "selection",
-            "data": {"bundle": "axi_other"},
-            "source": "spa",
-        }
-    )
-    seq2, payload2 = handle.latest_selection
-    assert seq2 == 2
-    assert payload2 == {"bundle": "axi_other"}
-
-
-def test_on_message_rejects_self_source(handle):
-    handle._on_message(
-        {
-            "topic": "selection",
-            "data": {"bundle": "axi_xbar"},
-            "source": "notebook",
-        }
-    )
-    seq, payload = handle.latest_selection
-    assert seq == 0
-    assert payload is None
-
-
-def test_on_message_ignores_unknown_topic(handle):
-    handle._on_message({"topic": "noise", "data": {"x": 1}, "source": "spa"})
-    assert handle.latest_selection == (0, None)
-
-
-def test_publish_time_window_queues_envelope(handle):
-    handle.publish_time_window(1000, 5000)
-    raw = handle._outbound.get_nowait()
-    env = json.loads(raw)
-    assert env == {
-        "topic": "time-window",
-        "data": {"t_start_fs": 1000, "t_end_fs": 5000},
-        "source": "notebook",
+def _sel(instance_path, origin="view"):
+    """A hub ``selection_changed`` envelope (hub-protocol-v1)."""
+    return {
+        "v": 1,
+        "id": "00000000-0000-0000-0000-000000000000",
+        "origin": origin,
+        "kind": "event",
+        "type": "selection_changed",
+        "payload": {"instance_path": instance_path},
     }
 
 
-def test_publish_time_window_drops_when_queue_full(handle):
-    for i in range(sync_mod._OUTBOUND_MAX + 5):
-        handle.publish_time_window(i, i + 1)
-    # Drain — should have at most _OUTBOUND_MAX entries.
-    drained = []
-    while True:
-        try:
-            drained.append(handle._outbound.get_nowait())
-        except Exception:
-            break
-    assert len(drained) == sync_mod._OUTBOUND_MAX
+def test_on_message_accepts_selection_changed_and_bumps_seq(handle):
+    seq0, payload0 = handle.latest_selection
+    assert seq0 == 0 and payload0 is None
+
+    handle._on_message(_sel("system.dut.out1"))
+    seq1, payload1 = handle.latest_selection
+    assert seq1 == 1
+    assert payload1 == {"instance_path": "system.dut.out1", "origin": "view"}
+
+    handle._on_message(_sel("system.dut.in0"))
+    seq2, payload2 = handle.latest_selection
+    assert seq2 == 2
+    assert payload2 == {"instance_path": "system.dut.in0", "origin": "view"}
+
+
+def test_on_message_accepts_instance_path_list(handle):
+    """instance_path may be a list when the hub collapsed a multi-driver
+    signal — we keep it verbatim for the template to resolve."""
+    handle._on_message(_sel(["system.dut.out0", "system.dut.out1"]))
+    _, payload = handle.latest_selection
+    assert payload["instance_path"] == ["system.dut.out0", "system.dut.out1"]
+
+
+def test_on_message_rejects_own_origin(handle):
+    handle._on_message(_sel("system.dut.out1", origin="notebook"))
+    assert handle.latest_selection == (0, None)
+
+
+def test_on_message_ignores_non_selection_type(handle):
+    handle._on_message({"v": 1, "origin": "cli", "kind": "event", "type": "welcome"})
+    handle._on_message({"v": 1, "origin": "view", "kind": "event", "type": "bye"})
+    assert handle.latest_selection == (0, None)
+
+
+def test_on_message_ignores_selection_without_instance_path(handle):
+    handle._on_message(
+        {"v": 1, "origin": "view", "kind": "event", "type": "selection_changed"}
+    )
+    assert handle.latest_selection == (0, None)
+
+
+def test_hello_is_a_valid_notebook_origin_request(handle):
+    env = json.loads(handle._hello())
+    assert env["v"] == 1
+    assert env["origin"] == "notebook"
+    assert env["kind"] == "request"
+    assert env["type"] == "hello"
+    assert env["payload"]["client"] == "notebook"
+    # RFC-4122 shape so it passes the hub schema's id pattern.
+    assert len(env["id"].split("-")) == 5
+
+
+def test_publish_time_window_is_noop(handle):
+    """No hub message type for a notebook→SPA window yet — must not
+    raise and must not enqueue anything to the hub."""
+    handle.publish_time_window(1000, 5000)
+    assert not hasattr(handle, "_outbound")
 
 
 # --- inbound push hook (axi-profiler #46) --------------------------------
@@ -126,7 +128,7 @@ def pushes(monkeypatch):
     monkeypatch.setattr(sync_mod.EventSync, "_run_in_thread", lambda self: None)
     calls: list[int] = []
     handle = sync_mod.EventSync(
-        url="ws://test/api/events/sync",
+        url="ws://test/ws",
         on_inbound=lambda: calls.append(1),
     )
     return handle, calls
@@ -134,14 +136,12 @@ def pushes(monkeypatch):
 
 def test_on_message_fires_push_only_for_accepted_selection(pushes):
     handle, calls = pushes
-    handle._on_message(
-        {"topic": "selection", "data": {"bundle": "axi_xbar"}, "source": "spa"}
-    )
+    handle._on_message(_sel("system.dut.out1"))
     assert len(calls) == 1
-    # Self-source and unknown-topic envelopes are dropped before the
+    # Own-origin and non-selection envelopes are dropped before the
     # push fires — the seq stays put and no re-execution is nudged.
-    handle._on_message({"topic": "selection", "data": {"x": 1}, "source": "notebook"})
-    handle._on_message({"topic": "noise", "data": {}, "source": "spa"})
+    handle._on_message(_sel("system.dut.out1", origin="notebook"))
+    handle._on_message({"v": 1, "origin": "view", "kind": "event", "type": "welcome"})
     assert len(calls) == 1
 
 
@@ -154,10 +154,10 @@ def test_on_message_swallows_push_exception(monkeypatch):
         raise RuntimeError("setter blew up")
 
     handle = sync_mod.EventSync(url="ws://test/x", on_inbound=boom)
-    handle._on_message({"topic": "selection", "data": {"bundle": "b"}, "source": "spa"})
+    handle._on_message(_sel("system.dut.out1"))
     # State still updated despite the push raising.
     seq, payload = handle.latest_selection
-    assert seq == 1 and payload == {"bundle": "b"}
+    assert seq == 1 and payload["instance_path"] == "system.dut.out1"
 
 
 def test_from_env_passes_on_inbound(monkeypatch):

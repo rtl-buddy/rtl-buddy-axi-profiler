@@ -2,8 +2,16 @@
 
 Phase 3 of the marimo umbrella (axi-profiler #16): joins the
 rtl-buddy-hub event broker at ``$RB_HUB_EVENTS_URL`` so a bundle
-click in the SPA reaches the notebook, and a brush in the notebook
-reaches the SPA's header chip.
+click in the SPA reaches the notebook.
+
+This speaks the real hub wire contract (``hub-protocol-v1.json``,
+rtl-buddy-axi-profiler#48): on connect it sends a ``hello`` request as
+``origin=notebook`` (the hub drops un-greeted peers), then consumes
+``selection_changed`` events — ``{type, payload:{instance_path}, origin}``
+— and exposes the latest one via :attr:`EventSync.latest_selection`.
+The notebook→SPA direction (a brush publishing a time window) has no
+hub message type yet, so :meth:`publish_time_window` is a no-op pending
+that follow-up.
 
 The notebook runs on its own loop (marimo / ASGI). We don't want to
 fight with that loop, so the sync runs in a background thread with
@@ -42,17 +50,29 @@ import json
 import logging
 import os
 import threading
-from queue import Queue
+import uuid
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
 
-SOURCE = "notebook"
+# rtl-buddy-hub wire contract (hub-protocol-v1.json). The notebook
+# registers as its own ``Origin`` (rtl_buddy hub + rtl-buddy-axi-profiler#48)
+# so SPA-origin ``selection_changed`` broadcasts reach it without
+# colliding with ``view`` (the SPA) or ``cli`` (``rb hub send``).
+_ORIGIN = "notebook"
+_PROTOCOL_V = 1
+
+try:
+    from importlib.metadata import version as _pkg_version
+
+    _CLIENT_VERSION = _pkg_version("rtl-buddy-axi-profiler")
+except Exception:  # pragma: no cover - version lookup is best-effort
+    _CLIENT_VERSION = "0+unknown"
+
 _RECONNECT_INITIAL = 0.5
 _RECONNECT_MAX = 8.0
 _RECONNECT_FACTOR = 1.8
-_OUTBOUND_MAX = 64
 
 
 class EventSync:
@@ -76,7 +96,6 @@ class EventSync:
         # equality check on the (mutable) dict payload.
         self._latest_selection_seq: int = 0
         self._lock = threading.Lock()
-        self._outbound: Queue[str] = Queue(maxsize=_OUTBOUND_MAX)
         self._stop = threading.Event()
         self._thread = _spawn_thread(self._run_in_thread, "event-sync")
         self._thread.start()
@@ -85,26 +104,32 @@ class EventSync:
     def latest_selection(self) -> tuple[int, dict[str, Any] | None]:
         """Return ``(seq, payload)`` for the most recent inbound selection.
 
-        ``seq`` increases by 1 every time a new ``selection`` envelope
-        arrives — track it across calls to detect changes; the payload
-        dict itself is the broker's ``data`` field.
+        ``seq`` increases by 1 every time a ``selection_changed`` event
+        arrives — track it across calls to detect changes. The payload
+        is ``{"instance_path": <str|list>, "origin": <str>}`` lifted
+        from the hub envelope; the template maps ``instance_path`` to a
+        bundle via the parquet's ``slave_path``.
         """
         with self._lock:
             return self._latest_selection_seq, self._latest_selection
 
     def publish_time_window(self, t_start_fs: int, t_end_fs: int) -> None:
-        """Queue a ``time-window`` envelope for the next outbound flush."""
-        env = {
-            "topic": "time-window",
-            "data": {"t_start_fs": int(t_start_fs), "t_end_fs": int(t_end_fs)},
-            "source": SOURCE,
-        }
-        try:
-            self._outbound.put_nowait(json.dumps(env))
-        except Exception:
-            # Queue full — drop. Time-window updates are throwaway;
-            # the next user brush replaces this one.
-            pass
+        """No-op against the hub (kept so the #32 brush cell calls it
+        harmlessly).
+
+        There is no hub message type for a notebook→SPA time window yet:
+        ``cursor_time_changed`` is a point, ``wave_zoom_to_range`` targets
+        surfer, not the SPA's header chip. Wiring this needs a new hub
+        event type + an SPA consumer — tracked as the outbound follow-up
+        to rtl-buddy-axi-profiler#48. Emitting the old ``{topic:...}``
+        envelope here would fail hub schema validation and risk dropping
+        the peer, so we deliberately send nothing."""
+        logger.debug(
+            "publish_time_window is a no-op pending a hub time-window type"
+            " (t_start_fs=%s t_end_fs=%s)",
+            t_start_fs,
+            t_end_fs,
+        )
 
     def close(self) -> None:
         """Signal the background thread to exit (best-effort)."""
@@ -114,23 +139,49 @@ class EventSync:
     # Internals
     # ------------------------------------------------------------------
 
+    def _hello(self) -> str:
+        """The hub requires a ``hello`` request as the first message
+        before it registers the peer and delivers any broadcasts."""
+        return json.dumps(
+            {
+                "v": _PROTOCOL_V,
+                "id": str(uuid.uuid4()),
+                "origin": _ORIGIN,
+                "kind": "request",
+                "type": "hello",
+                "payload": {
+                    "client": _ORIGIN,
+                    "version": _CLIENT_VERSION,
+                    "capabilities": [],
+                },
+            }
+        )
+
     def _on_message(self, env: dict[str, Any]) -> None:
-        if env.get("source") == SOURCE:
+        # Defensive: ignore anything the hub echoes back with our own
+        # origin. Everything that isn't a selection (welcome, peer_joined,
+        # cursor/scope events, …) is silently dropped.
+        if env.get("origin") == _ORIGIN or env.get("type") != "selection_changed":
             return
-        topic = env.get("topic")
-        if topic == "selection":
-            with self._lock:
-                self._latest_selection = env.get("data")
-                self._latest_selection_seq += 1
-            # Push outside the lock: nudge marimo to re-run the
-            # consuming cell now rather than on the next poll tick.
-            # No-op when there's no kernel context (run-mode / plain
-            # thread); the poll backstop still carries the selection.
-            if self._on_inbound is not None:
-                try:
-                    self._on_inbound()
-                except Exception:
-                    logger.debug("event-sync push failed", exc_info=True)
+        payload = env.get("payload") or {}
+        instance_path = payload.get("instance_path")
+        if not instance_path:
+            return
+        with self._lock:
+            self._latest_selection = {
+                "instance_path": instance_path,
+                "origin": env.get("origin"),
+            }
+            self._latest_selection_seq += 1
+        # Push outside the lock: nudge marimo to re-run the consuming
+        # cell now rather than on the next poll tick. No-op when there's
+        # no kernel context (run-mode / plain thread); the poll backstop
+        # still carries the selection.
+        if self._on_inbound is not None:
+            try:
+                self._on_inbound()
+            except Exception:
+                logger.debug("event-sync push failed", exc_info=True)
 
     def _run_in_thread(self) -> None:
         try:
@@ -150,16 +201,9 @@ class EventSync:
             try:
                 async with websockets.connect(self.url) as ws:
                     delay = _RECONNECT_INITIAL
-                    reader_task = asyncio.create_task(self._reader(ws))
-                    writer_task = asyncio.create_task(self._writer(ws))
-                    pending = (
-                        await asyncio.wait(
-                            [reader_task, writer_task],
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                    )[1]
-                    for t in pending:
-                        t.cancel()
+                    # Register first; the hub drops un-greeted peers.
+                    await ws.send(self._hello())
+                    await self._reader(ws)
             except Exception as exc:
                 logger.debug("event-sync reconnect after %s", exc)
             if self._should_stop():
@@ -191,12 +235,6 @@ class EventSync:
                 continue
             if isinstance(env, dict):
                 self._on_message(env)
-
-    async def _writer(self, ws: Any) -> None:
-        loop = asyncio.get_running_loop()
-        while True:
-            text = await loop.run_in_executor(None, self._outbound.get)
-            await ws.send(text)
 
 
 def _spawn_thread(target: Callable[[], None], name: str) -> threading.Thread:

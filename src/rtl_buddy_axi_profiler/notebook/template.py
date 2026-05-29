@@ -139,34 +139,59 @@ def _(get_selection_seq, refresher, sync):
 
 
 @app.cell(hide_code=True)
-def _(bundle_dd, spa_selection):
-    """SPA-driven selection wins when present and known to this parquet."""
-    if spa_selection and isinstance(spa_selection, dict):
-        bundle_from_spa = spa_selection.get("bundle")
-        if bundle_from_spa and bundle_from_spa in bundle_dd.options:
-            selected_bundle = bundle_from_spa
-        else:
-            selected_bundle = None if bundle_dd.value == "(all)" else bundle_dd.value
+def _(df):
+    """Resolve a hub `selection_changed.instance_path` to a local bundle.
+
+    The SPA publishes the clicked instance's view.json path (e.g.
+    `system.dut.out1`); the parquet keys each bundle by `slave_path`,
+    so we invert that. `instance_path` may be a list when the hub
+    collapsed a multi-driver signal — first match wins."""
+    _paths = df.select(["bundle_name", "slave_path"]).unique()
+    instance_to_bundle = {
+        row["slave_path"]: row["bundle_name"] for row in _paths.iter_rows(named=True)
+    }
+
+    def resolve_spa_bundle(sel):
+        if not (sel and isinstance(sel, dict)):
+            return None
+        ip = sel.get("instance_path")
+        candidates = ip if isinstance(ip, list) else [ip]
+        for c in candidates:
+            if c in instance_to_bundle:
+                return instance_to_bundle[c]
+        return None
+
+    return (resolve_spa_bundle,)
+
+
+@app.cell(hide_code=True)
+def _(bundle_dd, resolve_spa_bundle, spa_selection):
+    """SPA-driven selection wins when it resolves to a bundle this
+    parquet carries; otherwise fall back to the dropdown."""
+    bundle_from_spa = resolve_spa_bundle(spa_selection)
+    if bundle_from_spa and bundle_from_spa in bundle_dd.options:
+        selected_bundle = bundle_from_spa
     else:
         selected_bundle = None if bundle_dd.value == "(all)" else bundle_dd.value
     return (selected_bundle,)
 
 
 @app.cell(hide_code=True)
-def _(bundle_dd, mo, spa_selection):
+def _(bundle_dd, mo, resolve_spa_bundle, spa_selection):
     """Surface SPA→notebook divergence.
 
-    Without this, an SPA click on a bundle that this parquet doesn't
+    Without this, an SPA click on an instance this parquet doesn't
     carry silently falls back to the dropdown — indistinguishable
     from "the wire is broken" or "the user mis-clicked". A callout
-    here at least tells them which bundle the SPA *thought* they
+    here at least tells them which instance the SPA *thought* they
     wanted and that the notebook stayed on its own selection."""
     if spa_selection and isinstance(spa_selection, dict):
-        _missing = spa_selection.get("bundle")
-        if _missing and _missing not in bundle_dd.options:
+        _ip = spa_selection.get("instance_path")
+        if _ip and resolve_spa_bundle(spa_selection) is None:
+            _shown = _ip if isinstance(_ip, str) else ", ".join(str(x) for x in _ip)
             mo.callout(
                 mo.md(
-                    f"SPA selected **`{_missing}`** — not present in "
+                    f"SPA selected **`{_shown}`** — no matching bundle in "
                     f"this parquet. Showing dropdown selection "
                     f"(`{bundle_dd.value}`) instead."
                 ),
