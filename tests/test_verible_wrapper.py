@@ -56,10 +56,11 @@ def test_parse_to_json_routes_through_view_cache(
     sentinel = {"tag": "sentinel-from-view-cache"}
     captured: dict[str, object] = {}
 
-    def fake_get_or_compute(path, *, verible_binary, compute):
+    def fake_get_or_compute(path, *, verible_binary, compute, cache_dir):
         captured["path"] = path
         captured["binary"] = verible_binary
         captured["compute"] = compute
+        captured["cache_dir"] = cache_dir
         return sentinel
 
     from rtl_buddy_view import cst_cache
@@ -69,6 +70,8 @@ def test_parse_to_json_routes_through_view_cache(
         _verible, "locate_binary", lambda *a, **k: Path("/fake/verible")
     )
 
+    # Default: no cache_dir passed → forwarded as None (view falls back
+    # to env / XDG default).
     result = _verible.parse_to_json(sv_file)
     assert result is sentinel
     assert captured["path"] == sv_file
@@ -76,3 +79,10 @@ def test_parse_to_json_routes_through_view_cache(
     # The compute callback must be our subprocess body, so cache misses
     # still invoke verible-verilog-syntax — not silently no-op.
     assert captured["compute"] is _verible._invoke_verible
+    assert captured["cache_dir"] is None
+
+    # Explicit override: caller-injected cache_dir must reach view
+    # unchanged so rtl_buddy can honour the project's configured path.
+    explicit = tmp_path / "shared-cst-cache"
+    _verible.parse_to_json(sv_file, cache_dir=explicit)
+    assert captured["cache_dir"] == explicit
