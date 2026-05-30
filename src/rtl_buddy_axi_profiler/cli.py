@@ -172,6 +172,15 @@ def run(
             duration_cycles=cycles,
             clock_period_ns=period_ns,
         )
+        # Fold in the per-channel cycle metrics (util%, bp%, txns/beats)
+        # the transaction-only aggregate leaves at zero, from the ingest's
+        # per-cycle valid/ready tallies. The pipeline has fully drained by
+        # now, so ``channel_cycle_stats`` is complete.
+        from rtl_buddy_axi_profiler.stages.aggregate.standard import (
+            fill_channel_cycle_metrics as _fill_channels,
+        )
+
+        _fill_channels(stats, ingest_stage.channel_cycle_stats, cycles)
         _emit(stats, manifest_obj, output)
 
         if parquet_target is not None:

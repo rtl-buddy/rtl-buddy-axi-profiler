@@ -16,10 +16,12 @@ from rtl_buddy_axi_profiler.stages.aggregate.standard import (
     _jain_fairness,
     _percentile,
     aggregate,
+    fill_channel_cycle_metrics,
 )
 from rtl_buddy_axi_profiler.types import (
     Bundle,
     BundleSource,
+    Channel,
     DefaultView,
     Manifest,
     Protocol,
@@ -259,3 +261,40 @@ def test_standard_aggregate_wrapper_matches_direct_call() -> None:
     )
     assert wrapped.duration_cycles == direct.duration_cycles
     assert len(wrapped.bundles) == len(direct.bundles)
+
+
+def test_fill_channel_cycle_metrics_computes_bp_and_util() -> None:
+    """The CLI/e2e fill folds ingest per-cycle valid/ready tallies into
+    ChannelStats: bp% = stalled/asserted, util% = handshakes/duration,
+    and AR/AW/B carry txns while R/W carry beats."""
+    manifest = Manifest(
+        schema_version="1.0", design_top="top", bundles=(_bundle(name="b"),)
+    )
+    stats = aggregate(iter([]), manifest, duration_cycles=1000, clock_period_ns=1.0)
+    # Synthetic ingest tallies: W stalled 90 of 100 asserted cycles;
+    # AR fully un-stalled.
+    acc = {
+        "b": {
+            "w": {"active": 100, "stall": 90, "handshakes": 10},
+            "ar": {"active": 10, "stall": 0, "handshakes": 10},
+        }
+    }
+    fill_channel_cycle_metrics(stats, acc, 1000)
+    ch = stats.bundles[0].channels
+    assert ch[Channel.W].bp_pct == 90.0  # 90 / 100
+    assert ch[Channel.W].util_pct == 1.0  # 10 / 1000
+    assert ch[Channel.W].beats == 10 and ch[Channel.W].txns == 0  # W → beats
+    assert ch[Channel.AR].bp_pct == 0.0
+    assert ch[Channel.AR].txns == 10 and ch[Channel.AR].beats == 0  # AR → txns
+    # Channels with no tally stay zeroed.
+    assert ch[Channel.B].bp_pct == 0.0 and ch[Channel.B].txns == 0
+
+
+def test_fill_channel_cycle_metrics_empty_acc_is_noop() -> None:
+    manifest = Manifest(
+        schema_version="1.0", design_top="top", bundles=(_bundle(name="b"),)
+    )
+    stats = aggregate(iter([]), manifest, duration_cycles=1000, clock_period_ns=1.0)
+    fill_channel_cycle_metrics(stats, {}, 1000)
+    for cs in stats.bundles[0].channels.values():
+        assert cs.bp_pct == 0.0 and cs.util_pct == 0.0
