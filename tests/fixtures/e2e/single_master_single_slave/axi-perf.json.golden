@@ -17,34 +17,34 @@
       "default_view": "parent",
       "channels": {
         "ar": {
-          "util_pct": 0.0,
+          "util_pct": 4.92,
           "bp_pct": 0.0,
           "peak_occ": 0,
-          "txns": 0
+          "txns": 100
         },
         "aw": {
-          "util_pct": 0.0,
+          "util_pct": 4.92,
           "bp_pct": 0.0,
           "peak_occ": 0,
-          "txns": 0
+          "txns": 100
         },
         "r": {
-          "util_pct": 0.0,
+          "util_pct": 4.92,
           "bp_pct": 0.0,
           "peak_occ": 0,
-          "beats": 0
+          "beats": 100
         },
         "w": {
-          "util_pct": 0.0,
+          "util_pct": 4.92,
           "bp_pct": 0.0,
           "peak_occ": 0,
-          "beats": 0
+          "beats": 100
         },
         "b": {
-          "util_pct": 0.0,
+          "util_pct": 4.92,
           "bp_pct": 0.0,
           "peak_occ": 0,
-          "txns": 0
+          "txns": 100
         }
       },
       "throughput": {

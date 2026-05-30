@@ -144,6 +144,7 @@ def _resolve_bundle_clocks(
 def _emit_events(
     waveform: pywellen.Waveform,
     bundle_clocks: list[tuple[_BundleSignals, DetectedClock]],
+    channel_acc: dict | None = None,
 ) -> Iterator[HandshakeEvent]:
     """Walk each bundle's clock posedges independently; emit a
     HandshakeEvent on any channel where valid && ready holds.
@@ -152,6 +153,13 @@ def _emit_events(
     correctly — different bundles can use different clocks.
     Events from different bundles interleave in posedge order;
     the downstream reconstruct stage tolerates any interleaving.
+
+    ``channel_acc`` (optional) is a mutable dict the sampler updates
+    with per-(bundle, channel) cycle counters — ``active`` (valid
+    asserted), ``stall`` (valid && !ready → backpressure), and
+    ``handshakes`` (valid && ready). The CLI reads it after the
+    pipeline drains to fill ChannelStats util%/bp%/txns/beats, which
+    the aggregate (transaction-only) can't compute.
     """
     timescale = waveform.hierarchy.timescale()
     from rtl_buddy_axi_profiler.stages.ingest._clock_detect import _tick_to_fs
@@ -169,54 +177,85 @@ def _emit_events(
     for tick, idx in events:
         bs = bundle_clocks[idx][0]
         t_fs = tick * tick_fs
-        yield from _sample_bundle(bs, tick, t_fs)
+        yield from _sample_bundle(bs, tick, t_fs, channel_acc)
+
+
+def _bump(channel_acc: dict | None, bundle: str, ch: Channel, v: bool, r: bool) -> None:
+    """Update the per-(bundle, channel) cycle counters for one posedge."""
+    if channel_acc is None or not v:
+        return
+    acc = channel_acc.setdefault(bundle, {}).setdefault(
+        ch.value, {"active": 0, "stall": 0, "handshakes": 0}
+    )
+    acc["active"] += 1
+    if r:
+        acc["handshakes"] += 1
+    else:
+        acc["stall"] += 1
 
 
 def _sample_bundle(
-    bs: _BundleSignals, tick: int, t_fs: int
+    bs: _BundleSignals, tick: int, t_fs: int, channel_acc: dict | None = None
 ) -> Iterator[HandshakeEvent]:
-    """For one bundle at one clock posedge, emit a HandshakeEvent on
+    """For one bundle at one clock posedge: tally each channel's
+    valid/ready occupancy (for util%/bp%) and emit a HandshakeEvent on
     each channel where valid && ready hold simultaneously."""
-    if _high(bs.arvalid, tick) and _high(bs.arready, tick):
+    name = bs.bundle.name
+
+    arv, arr = _high(bs.arvalid, tick), _high(bs.arready, tick)
+    _bump(channel_acc, name, Channel.AR, arv, arr)
+    if arv and arr:
         yield HandshakeEvent(
             t_fs=t_fs,
-            bundle_name=bs.bundle.name,
+            bundle_name=name,
             channel=Channel.AR,
             txn_id=_int_at(bs.arid, tick),
             addr=_int_at(bs.araddr, tick),
             len_beats=_int_at(bs.arlen, tick),
             size_log2=_int_at(bs.arsize, tick),
         )
-    if _high(bs.awvalid, tick) and _high(bs.awready, tick):
+
+    awv, awr = _high(bs.awvalid, tick), _high(bs.awready, tick)
+    _bump(channel_acc, name, Channel.AW, awv, awr)
+    if awv and awr:
         yield HandshakeEvent(
             t_fs=t_fs,
-            bundle_name=bs.bundle.name,
+            bundle_name=name,
             channel=Channel.AW,
             txn_id=_int_at(bs.awid, tick),
             addr=_int_at(bs.awaddr, tick),
             len_beats=_int_at(bs.awlen, tick),
             size_log2=_int_at(bs.awsize, tick),
         )
-    if _high(bs.rvalid, tick) and _high(bs.rready, tick):
+
+    rv, rr = _high(bs.rvalid, tick), _high(bs.rready, tick)
+    _bump(channel_acc, name, Channel.R, rv, rr)
+    if rv and rr:
         yield HandshakeEvent(
             t_fs=t_fs,
-            bundle_name=bs.bundle.name,
+            bundle_name=name,
             channel=Channel.R,
             txn_id=_int_at(bs.rid, tick),
             resp=_int_at(bs.rresp, tick),
             last=bool(_int_at(bs.rlast, tick)),
         )
-    if _high(bs.wvalid, tick) and _high(bs.wready, tick):
+
+    wv, wr = _high(bs.wvalid, tick), _high(bs.wready, tick)
+    _bump(channel_acc, name, Channel.W, wv, wr)
+    if wv and wr:
         yield HandshakeEvent(
             t_fs=t_fs,
-            bundle_name=bs.bundle.name,
+            bundle_name=name,
             channel=Channel.W,
             last=bool(_int_at(bs.wlast, tick)),
         )
-    if _high(bs.bvalid, tick) and _high(bs.bready, tick):
+
+    bv, br = _high(bs.bvalid, tick), _high(bs.bready, tick)
+    _bump(channel_acc, name, Channel.B, bv, br)
+    if bv and br:
         yield HandshakeEvent(
             t_fs=t_fs,
-            bundle_name=bs.bundle.name,
+            bundle_name=name,
             channel=Channel.B,
             txn_id=_int_at(bs.bid, tick),
             resp=_int_at(bs.bresp, tick),
@@ -354,6 +393,11 @@ class WellenIngest:
         self._detected_clock: DetectedClock | None = None
         self._bundle_clocks: list[tuple[str, DetectedClock]] = []
         self.tb_prefix = tb_prefix
+        # Per-(bundle_name, channel) cycle counters, filled lazily as the
+        # event generator is consumed: {bundle: {ch: {active, stall,
+        # handshakes}}}. Read by the CLI after the pipeline drains to
+        # populate ChannelStats util%/bp%/txns/beats.
+        self.channel_cycle_stats: dict = {}
 
     @property
     def detected_clock(self) -> DetectedClock | None:
@@ -395,4 +439,5 @@ class WellenIngest:
             )
         else:
             self._detected_clock = None
-        return _emit_events(waveform, bundle_clocks)
+        self.channel_cycle_stats = {}
+        return _emit_events(waveform, bundle_clocks, self.channel_cycle_stats)

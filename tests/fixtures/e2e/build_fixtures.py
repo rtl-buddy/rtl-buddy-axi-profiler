@@ -20,7 +20,10 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from rtl_buddy_axi_profiler.stages.aggregate.standard import aggregate
+from rtl_buddy_axi_profiler.stages.aggregate.standard import (
+    aggregate,
+    fill_channel_cycle_metrics,
+)
 from rtl_buddy_axi_profiler.stages.emit.json_v1 import build_payload
 from rtl_buddy_axi_profiler.stages.ingest.wellen import WellenIngest
 from rtl_buddy_axi_profiler.stages.reconstruct.axi4 import reconstruct
@@ -614,6 +617,7 @@ def _write_golden(fixture_dir: Path, manifest: Manifest) -> None:
     cycles = len(clock.posedge_times) if clock else 0
     period_ns = (clock.period_fs / 1e6) if clock else 1.0
     stats = aggregate(txns, manifest, duration_cycles=cycles, clock_period_ns=period_ns)
+    fill_channel_cycle_metrics(stats, ingest.channel_cycle_stats, cycles)
     payload = build_payload(
         stats, manifest, tool="rtl-buddy-axi-profiler", tool_version="golden"
     )
