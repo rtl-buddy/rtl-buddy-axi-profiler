@@ -267,7 +267,9 @@ def test_fill_channel_cycle_metrics_computes_bp_and_util() -> None:
     """The CLI/e2e fill folds ingest per-cycle valid/ready tallies into
     ChannelStats: bp% = stalled/asserted, util% = handshakes/duration,
     and AR/AW/B carry txns while R/W carry beats."""
-    manifest = Manifest(schema_version="1.0", design_top="top", bundles=(_bundle(name="b"),))
+    manifest = Manifest(
+        schema_version="1.0", design_top="top", bundles=(_bundle(name="b"),)
+    )
     stats = aggregate(iter([]), manifest, duration_cycles=1000, clock_period_ns=1.0)
     # Synthetic ingest tallies: W stalled 90 of 100 asserted cycles;
     # AR fully un-stalled.
@@ -279,9 +281,9 @@ def test_fill_channel_cycle_metrics_computes_bp_and_util() -> None:
     }
     fill_channel_cycle_metrics(stats, acc, 1000)
     ch = stats.bundles[0].channels
-    assert ch[Channel.W].bp_pct == 90.0            # 90 / 100
-    assert ch[Channel.W].util_pct == 1.0           # 10 / 1000
-    assert ch[Channel.W].beats == 10 and ch[Channel.W].txns == 0   # W → beats
+    assert ch[Channel.W].bp_pct == 90.0  # 90 / 100
+    assert ch[Channel.W].util_pct == 1.0  # 10 / 1000
+    assert ch[Channel.W].beats == 10 and ch[Channel.W].txns == 0  # W → beats
     assert ch[Channel.AR].bp_pct == 0.0
     assert ch[Channel.AR].txns == 10 and ch[Channel.AR].beats == 0  # AR → txns
     # Channels with no tally stay zeroed.
@@ -289,7 +291,9 @@ def test_fill_channel_cycle_metrics_computes_bp_and_util() -> None:
 
 
 def test_fill_channel_cycle_metrics_empty_acc_is_noop() -> None:
-    manifest = Manifest(schema_version="1.0", design_top="top", bundles=(_bundle(name="b"),))
+    manifest = Manifest(
+        schema_version="1.0", design_top="top", bundles=(_bundle(name="b"),)
+    )
     stats = aggregate(iter([]), manifest, duration_cycles=1000, clock_period_ns=1.0)
     fill_channel_cycle_metrics(stats, {}, 1000)
     for cs in stats.bundles[0].channels.values():
