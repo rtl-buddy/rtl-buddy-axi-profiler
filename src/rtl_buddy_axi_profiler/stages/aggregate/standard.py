@@ -135,6 +135,49 @@ def aggregate(
     )
 
 
+def fill_channel_cycle_metrics(
+    stats: AggregateStats,
+    channel_cycle_stats: dict,
+    duration_cycles: int,
+) -> None:
+    """Patch per-channel cycle metrics onto an :class:`AggregateStats`.
+
+    The aggregate stage is transaction-only and leaves ChannelStats'
+    ``util_pct`` / ``bp_pct`` / ``txns`` / ``beats`` at zero (the
+    per-cycle valid/ready occupancy isn't visible from reconstructed
+    transactions). The ingest stage tallies it as a side-channel
+    (``WellenIngest.channel_cycle_stats``); call this once the event
+    stream has fully drained to fold those tallies in.
+
+    Definitions:
+      * ``bp_pct``  = stalled / asserted cycles (valid && !ready over
+        cycles where valid is asserted) — i.e. backpressure seen by the
+        side driving the channel.
+      * ``util_pct`` = handshakes / duration_cycles — transfer
+        utilization over the run.
+      * ``txns`` (AR/AW/B) / ``beats`` (R/W) = handshake count.
+
+    Idempotent and safe to call with an empty ``channel_cycle_stats``
+    (leaves the zeros in place).
+    """
+    for bs in stats.bundles:
+        acc = channel_cycle_stats.get(bs.bundle.name, {})
+        for ch in Channel:
+            cs = bs.channels.get(ch)
+            a = acc.get(ch.value)
+            if cs is None or not a:
+                continue
+            active, stall, handshakes = a["active"], a["stall"], a["handshakes"]
+            cs.bp_pct = round(stall / active * 100, 2) if active else 0.0
+            cs.util_pct = (
+                round(handshakes / duration_cycles * 100, 2) if duration_cycles else 0.0
+            )
+            if ch in (Channel.R, Channel.W):
+                cs.beats = handshakes
+            else:
+                cs.txns = handshakes
+
+
 def _accumulate_transaction(acc: _BundleAcc, txn: Transaction) -> None:
     """Update one bundle's accumulators with a single transaction."""
     if txn.resp == 2:

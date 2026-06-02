@@ -19,7 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from rtl_buddy_axi_profiler.stages.aggregate.standard import aggregate
+from rtl_buddy_axi_profiler.stages.aggregate.standard import (
+    aggregate,
+    fill_channel_cycle_metrics,
+)
 from rtl_buddy_axi_profiler.stages.discover._load import load_manifest
 from rtl_buddy_axi_profiler.stages.emit.json_v1 import build_payload
 from rtl_buddy_axi_profiler.stages.ingest.wellen import WellenIngest
@@ -59,6 +62,7 @@ def test_e2e_fixture_matches_golden(fixture_name: str) -> None:
     cycles = len(clock.posedge_times)
     period_ns = clock.period_fs / 1e6
     stats = aggregate(txns, manifest, duration_cycles=cycles, clock_period_ns=period_ns)
+    fill_channel_cycle_metrics(stats, ingest.channel_cycle_stats, cycles)
     payload = build_payload(stats, manifest, tool_version="golden")
 
     diff = diff_axi_perf(payload, golden)
