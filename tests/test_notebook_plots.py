@@ -164,6 +164,70 @@ def test_throughput_default_units_are_gigabytes_per_second() -> None:
     )
 
 
+def test_throughput_is_a_step_function() -> None:
+    """The throughput plot draws a step (``step-after``), not a sloped
+    line: each level is an average over a whole window, so it must be
+    held flat across the window rather than interpolated between
+    points."""
+    chart = plots.throughput(_sample_df())
+    mark = chart.to_dict()["mark"]
+    assert mark["type"] == "line", f"expected a line mark, got {mark}"
+    assert mark["interpolate"] == "step-after", (
+        f"throughput step must anchor on the window's left edge via "
+        f"'step-after' (level held across the window it measures); got {mark}"
+    )
+
+
+def test_throughput_x_is_window_left_edge() -> None:
+    """Each point's time is the window's LEFT EDGE (``bin * window_ps``),
+    so ``step-after`` holds the level across exactly the window it
+    measures — transitions land on window boundaries, not centered."""
+    df = pl.DataFrame(
+        [
+            {
+                "bundle_name": "b0",
+                "len_beats": 2,
+                "size_log2": 0,
+                "t_start_ps": t,
+                "t_end_ps": t + 5,
+                "txn_id": 0,
+                "is_read": True,
+            }
+            for t in (100, 250, 600)  # all inside window 0 of a 1000 ps grid
+        ]
+    )
+    data = pl.DataFrame(plots.throughput(df, window_ps=1000).data)
+    # Window 0's point sits at its left edge (t_ps == 0), not its mid (500).
+    assert 0 in data["t_ps"].to_list()
+    assert 500 not in data["t_ps"].to_list()
+
+
+def test_throughput_zero_fills_idle_windows() -> None:
+    """A window with no transaction *starts* contributes 0 by this
+    metric, so densify must emit a 0 GB/s sample for it — the step
+    drops to the floor during idle time instead of coasting at the
+    previous level."""
+    df = pl.DataFrame(
+        [
+            {
+                "bundle_name": "b0",
+                "len_beats": 2,
+                "size_log2": 0,
+                "t_start_ps": t,
+                "t_end_ps": t + 5,
+                "txn_id": 0,
+                "is_read": True,
+            }
+            # windows 0 and 2 have starts; window 1 ([1000,2000)) is idle.
+            for t in (100, 2100)
+        ]
+    )
+    data = pl.DataFrame(plots.throughput(df, window_ps=1000).data)
+    idle = data.filter(pl.col("t_ps") == 1000)
+    assert idle.height == 1, "idle window 1 must be densified to a row"
+    assert idle["gbps"].item() == 0.0, "idle window must read 0 GB/s, not coast"
+
+
 def _walk_for_titles(obj):
     """Collect every 'title' string anywhere in the altair JSON spec."""
     found: list[str] = []

@@ -28,7 +28,7 @@ the rest of the cells, so changing one filter reflows the others.
 
 import marimo
 
-__generated_with = "0.23.7"
+__generated_with = "0.23.8"
 app = marimo.App(width="medium", app_title="axi-perf drill-down")
 
 
@@ -220,6 +220,31 @@ def _(df, mo):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Drill-down plots
+
+    Six views of the same transaction set. The **bundle** dropdown
+    above filters every per-bundle plot (the fairness plot is
+    interconnect-wide and intentionally ignores it); when this
+    notebook is attached to a running rtl-buddy-view SPA, clicking an
+    instance there drives the same filter.
+
+    ### AXI transaction timeline
+
+    One tick per transaction, drawn at its **start time** (x-axis,
+    auto-scaled ps → ns → μs → ms) and stacked by **bundle**
+    (y-axis). Colour separates reads from writes. **Drag
+    horizontally to brush a time window** — the selected span is
+    published to the connected SPA as a `time-window` envelope (the
+    cross-tool wire); it does not re-filter the plots below. Above
+    ~50k rows the timeline stride-samples to stay responsive (a
+    banner flags when this kicks in).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _(df, mo, selected_bundle):
     """Brushable timeline. Wrapped in ``mo.ui.altair_chart`` so the
     interval selection is reactive — the publisher cell below reads
@@ -251,10 +276,44 @@ def _(sync, timeline_chart):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Latency CDF
+
+    Empirical cumulative distribution of per-transaction latency, in
+    clock **cycles** (x-axis). The y-axis is the fraction of
+    transactions at or below that latency (0–1). Two curves: the
+    **read** path `ar_to_r_first` (address-read → first read beat)
+    and the **write** path `aw_to_b` (address-write → write
+    response). A steep early rise means most transactions complete
+    quickly; a long flat tail flags stragglers. Honours the bundle
+    dropdown.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _(df, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import latency_cdf
 
     latency_cdf(df, bundle=selected_bundle)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Outstanding-depth over time
+
+    Live count of **in-flight transactions** per bundle (y-axis, a
+    count) against time (x-axis, auto-scaled). Reconstructed by
+    replaying +1 at each transaction's start and −1 at its end, then
+    taking the running sum — so the height is how many transactions
+    are simultaneously outstanding. A rising plateau means the slave
+    isn't draining as fast as the master issues (back-pressure /
+    head-of-line blocking). Drawn as a step area; stride-samples
+    above ~50k events. Honours the bundle dropdown.
+    """)
     return
 
 
@@ -267,10 +326,41 @@ def _(df, selected_bundle):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Transaction-ID heatmap
+
+    One cell per (**bundle**, AXI **`txn_id`**); colour encodes the
+    **number of transactions** that used that ID on that bundle.
+    Hover a cell for its mean read (AR→R) and write (AW→B) latency,
+    in **cycles**. Use it to spot an ID that's hammered (hot column)
+    or one that's unusually slow (high mean latency in the tooltip).
+    Honours the bundle dropdown.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _(df, selected_bundle):
     from rtl_buddy_axi_profiler.notebook.plots import id_heatmap
 
     id_heatmap(df, bundle=selected_bundle)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Sliding-window fairness
+
+    **Jain fairness index** (y-axis, 0–1; **1 = every active bundle
+    got an equal share** of bytes) computed over successive windows
+    of 256 transactions across the whole session (x-axis = window
+    midpoint time, auto-scaled). Dips mark windows where one bundle
+    starved the others. This is an **interconnect-level** metric, so
+    the bundle dropdown intentionally does **not** apply — a single
+    bundle has no peers to be fair to.
+    """)
     return
 
 
@@ -281,6 +371,27 @@ def _(df):
     from rtl_buddy_axi_profiler.notebook.plots import fairness
 
     fairness(df)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Throughput (step)
+
+    Average throughput per bundle in **GB/s** (y-axis) over fixed
+    time windows (default **1 μs**; x-axis = window start time,
+    auto-scaled). Drawn as a **step function** rather than a line:
+    each flat level is the average throughput *during* that window,
+    held from the window's left edge to its right edge — so the
+    steps transition on the **window boundaries, not centred on the
+    points**. (The value is an integral over the whole window, not a
+    sample at an instant, so anchoring it to the window's edges is
+    the faithful reading.) Windows with no transaction starts read
+    **0 GB/s**, so the trace drops to the floor during idle time
+    instead of coasting at the previous level. Honours the bundle
+    dropdown.
+    """)
     return
 
 

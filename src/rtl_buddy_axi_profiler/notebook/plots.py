@@ -149,10 +149,10 @@ def timeline(df: Any, *, bundle: str | None = None) -> Any:
                 "is_read",
                 "txn_id",
                 "addr",
-                "len_beats",
+                alt.Tooltip("len_beats:Q", title="len (beats)"),
                 "resp",
-                "t_start_ps",
-                "t_end_ps",
+                alt.Tooltip("t_start_ps:Q", title="t_start (ps)"),
+                alt.Tooltip("t_end_ps:Q", title="t_end (ps)"),
             ],
         )
         .add_params(brush)
@@ -201,9 +201,13 @@ def latency_cdf(df: Any, *, bundle: str | None = None) -> Any:
         .mark_line()
         .encode(
             x=alt.X("cycles:Q", title="latency (cycles)"),
-            y=alt.Y("cdf:Q", title="empirical CDF"),
+            y=alt.Y("cdf:Q", title="empirical CDF (fraction of txns)"),
             color=alt.Color("kind:N", title="latency type"),
-            tooltip=["kind", "cycles", alt.Tooltip("cdf:Q", format=".3f")],
+            tooltip=[
+                "kind",
+                alt.Tooltip("cycles:Q", title="latency (cyc)"),
+                alt.Tooltip("cdf:Q", format=".3f", title="CDF (fraction)"),
+            ],
         )
         .properties(height=240, title="Latency CDF (per transaction)")
         .interactive()
@@ -253,9 +257,13 @@ def outstanding_depth(df: Any, *, bundle: str | None = None) -> Any:
         .mark_area(opacity=0.4, interpolate="step-after")
         .encode(
             x=alt.X("t:Q", title=label),
-            y=alt.Y("depth:Q", title="outstanding"),
-            color=alt.Color("bundle_name:N"),
-            tooltip=["bundle_name", "t_ps", "depth"],
+            y=alt.Y("depth:Q", title="outstanding transactions (count)"),
+            color=alt.Color("bundle_name:N", title="bundle"),
+            tooltip=[
+                "bundle_name",
+                alt.Tooltip("t_ps:Q", title="t (ps)"),
+                alt.Tooltip("depth:Q", title="outstanding (count)"),
+            ],
         )
         .properties(height=200, title="Outstanding-depth over time")
         .interactive()
@@ -290,9 +298,9 @@ def id_heatmap(df: Any, *, bundle: str | None = None) -> Any:
             tooltip=[
                 "bundle_name",
                 "txn_id",
-                "count",
-                alt.Tooltip("mean_ar_to_r:Q", format=".1f"),
-                alt.Tooltip("mean_aw_to_b:Q", format=".1f"),
+                alt.Tooltip("count:Q", title="# txns"),
+                alt.Tooltip("mean_ar_to_r:Q", format=".1f", title="mean AR→R (cyc)"),
+                alt.Tooltip("mean_aw_to_b:Q", format=".1f", title="mean AW→B (cyc)"),
             ],
         )
         .properties(height=240, title="Transaction ID heatmap")
@@ -352,8 +360,16 @@ def fairness(df: Any, *, window_size: int = 256) -> Any:
         .mark_line(point=True)
         .encode(
             x=alt.X("t:Q", title=label),
-            y=alt.Y("jain:Q", title="Jain fairness", scale=alt.Scale(domain=[0, 1])),
-            tooltip=["t_ps", alt.Tooltip("jain:Q", format=".3f"), "n_bundles"],
+            y=alt.Y(
+                "jain:Q",
+                title="Jain fairness index (0–1, 1 = fair)",
+                scale=alt.Scale(domain=[0, 1]),
+            ),
+            tooltip=[
+                alt.Tooltip("t_ps:Q", title="window mid (ps)"),
+                alt.Tooltip("jain:Q", format=".3f", title="Jain index"),
+                alt.Tooltip("n_bundles:Q", title="# active bundles"),
+            ],
         )
         .properties(height=200, title=f"Sliding-window fairness ({window_size}-txn)")
         .interactive()
@@ -361,18 +377,49 @@ def fairness(df: Any, *, window_size: int = 256) -> Any:
 
 
 def throughput(df: Any, *, window_ps: int = 1_000_000) -> Any:
-    """Rolling-window throughput per bundle, displayed in GB/s.
+    """Windowed throughput per bundle, drawn as a step function in GB/s.
 
-    Bins transactions by ``t_start_ps`` into windows of ``window_ps``
-    picoseconds, sums bytes, and shows per-bundle throughput in
-    **gigabytes per second** — the natural unit for modern AXI fabrics
-    where realistic wire speeds land in the multi-GB/s range. The
-    underlying axi-perf.json roll-up still reports bits/sec; this plot
-    converts at the display boundary (``GB/s = bytes_per_s / 1e9``).
+    Bins transactions by ``t_start_ps`` into fixed windows of
+    ``window_ps`` picoseconds, sums the bytes that *started* in each
+    window, and divides by the window length to get the average
+    throughput **during** that window — reported in **gigabytes per
+    second** (the natural unit for modern AXI fabrics, where realistic
+    wire speeds land in the multi-GB/s range). The underlying
+    axi-perf.json roll-up still reports bits/sec; this plot converts at
+    the display boundary (``GB/s = bytes_per_s / 1e9``).
 
-    Default window is 1 μs — coarse enough to keep the line readable
-    on multi-ms sims but fine enough to spot per-burst variation on
-    100 ns – 10 μs runs. Pass ``window_ps`` to override.
+    **Step, not line.** Each bin's value is an average over the whole
+    window, not a sample at an instant, so it is drawn as a flat level
+    spanning the window rather than a sloped line between points. That
+    forces a choice the docstring pins down deliberately:
+
+      * The x-coordinate of each point is the window's **left edge**
+        (``bin * window_ps``) — the moment the averaging window opens.
+      * The mark uses ``interpolate="step-after"``, which holds a
+        point's level from its own x rightward to the next point's x.
+        With x at the left edge, that level covers exactly
+        ``[bin*W, (bin+1)*W)`` — the window it measures.
+
+    So the step transitions sit on the **window boundaries (between the
+    binned points), not centered on them**. Centering the step
+    (``interpolate="step"`` with the point at the bin midpoint) would
+    imply the throughput was *sampled at the midpoint*; but it is an
+    integral over the entire window, and any idle window would then put
+    the transition half a window off. Edge-anchored ``step-after`` is
+    the faithful representation.
+
+    **Idle windows read 0, not the last level.** A window with no
+    transaction *starts* contributes 0 bytes by this metric (a txn's
+    bytes are attributed to the window it starts in), so we densify each
+    bundle's bins to a contiguous grid and fill the gaps with 0 — the
+    step drops to the floor during idle time instead of coasting at the
+    previous level. A closing point per bundle at the right edge of the
+    last window makes that final window render at full width (carrying
+    its level forward — we make no claim about traffic past the trace).
+
+    Default window is 1 μs — coarse enough to stay readable on multi-ms
+    sims but fine enough to spot per-burst variation on 100 ns – 10 μs
+    runs. Pass ``window_ps`` to override.
     """
     alt, pl = _imports()
     df = _ensure_polars(df, pl)
@@ -389,32 +436,69 @@ def throughput(df: Any, *, window_ps: int = 1_000_000) -> Any:
     agg = binned.group_by(["bundle_name", "bin"]).agg(
         pl.col("bytes_per_txn").sum().alias("bytes")
     )
-    # Convert: bytes per bin → bytes per second → gigabytes per second.
+
+    # Densify: fill windows that saw no transaction starts with 0 bytes so
+    # the step drops to the floor during idle time rather than coasting at
+    # the last level. Each bundle gets a contiguous bin grid [min, max].
+    if agg.height > 0:
+        bounds = agg.group_by("bundle_name").agg(
+            pl.col("bin").min().alias("bin_lo"),
+            pl.col("bin").max().alias("bin_hi"),
+        )
+        grid = (
+            bounds.with_columns(
+                bin=pl.int_ranges(pl.col("bin_lo"), pl.col("bin_hi") + 1)
+            )
+            .explode("bin")
+            .select("bundle_name", "bin")
+        )
+        agg = grid.join(agg, on=["bundle_name", "bin"], how="left").with_columns(
+            pl.col("bytes").fill_null(0)
+        )
+
+    # Convert: bytes per window → bytes per second → gigabytes per second.
     # 1 ps = 1e-12 s, so bytes/s = bytes / (window_ps * 1e-12);
-    # GB/s = (bytes/s) / 1e9.
+    # GB/s = (bytes/s) / 1e9. ``t_ps`` is the window's LEFT EDGE so that
+    # ``step-after`` holds the level across the window it belongs to.
     window_s = window_ps * 1e-12
     agg = agg.with_columns(
         gbps=pl.col("bytes") / (window_s * 1e9),
         t_ps=pl.col("bin") * window_ps,
     )
+
+    # Pick the time unit from the real data (before adding closers, so one
+    # extra trailing window can't nudge the unit boundary).
     divisor, time_label = _pick_time_unit(_time_span_ps(agg, pl, "t_ps"))
+
+    # Closing edge per bundle: step-after omits the trailing point's
+    # rightward level, so append a point at the last window's right edge
+    # carrying the same level — renders the final window at full width.
+    if agg.height > 0:
+        closers = (
+            agg.sort(["bundle_name", "bin"])
+            .group_by("bundle_name", maintain_order=True)
+            .last()
+            .with_columns(t_ps=(pl.col("bin") + 1) * window_ps)
+        )
+        agg = pl.concat([agg, closers])
+
     agg = agg.with_columns(t=(pl.col("t_ps") / divisor))
     return (
         alt.Chart(agg)
-        .mark_line()
+        .mark_line(interpolate="step-after")
         .encode(
             x=alt.X("t:Q", title=time_label),
             y=alt.Y("gbps:Q", title="throughput (GB/s)"),
-            color=alt.Color("bundle_name:N"),
+            color=alt.Color("bundle_name:N", title="bundle"),
             tooltip=[
                 "bundle_name",
-                "t_ps",
+                alt.Tooltip("t_ps:Q", title="window start (ps)"),
                 alt.Tooltip("gbps:Q", format=".3f", title="GB/s"),
             ],
         )
         .properties(
             height=200,
-            title=f"Throughput ({window_ps / 1_000_000:g} μs bins)",
+            title=f"Throughput ({window_ps / 1_000_000:g} μs bins, step = avg/window)",
         )
         .interactive()
     )
