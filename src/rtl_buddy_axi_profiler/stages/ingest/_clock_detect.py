@@ -100,7 +100,10 @@ def resolve_bundle_clock(
 
     try:
         sig = waveform.get_signal_from_path(clock_signal_path)
-    except Exception:
+    except RuntimeError:
+        # pywellen's genuine-miss exception; an incompatible pywellen
+        # (e.g. the 0.25 API rewrite, #52) raises AttributeError instead
+        # and must propagate rather than read as a bad clock_signal.
         raise ClockDetectError(
             f"clock signal {clock_signal_path!r} not found in trace; "
             f"check the bundle's clock_signal against the trace's hierarchy."
