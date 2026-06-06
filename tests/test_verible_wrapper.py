@@ -86,3 +86,56 @@ def test_parse_to_json_routes_through_view_cache(
     explicit = tmp_path / "shared-cst-cache"
     _verible.parse_to_json(sv_file, cache_dir=explicit)
     assert captured["cache_dir"] == explicit
+
+
+def test_parse_to_json_falls_back_when_view_too_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A too-old rtl-buddy-view (below the [verible] floor) must bypass
+    the shared cache and parse directly, rather than calling a stale
+    ``get_or_compute`` surface. The git/editable install path slips past
+    the resolve-time ``>=`` floor, so the runtime guard backstops it."""
+    pytest.importorskip("rtl_buddy_view.cst_cache")
+
+    sv_file = tmp_path / "stale.sv"
+    sv_file.write_text("module m; endmodule\n")
+
+    from rtl_buddy_view import cst_cache
+
+    def exploding_get_or_compute(*args, **kwargs):
+        raise AssertionError("cache must not be used when view is too old")
+
+    monkeypatch.setattr(cst_cache, "get_or_compute", exploding_get_or_compute)
+    monkeypatch.setattr(
+        _verible, "locate_binary", lambda *a, **k: Path("/fake/verible")
+    )
+    # Pretend an ancient view is installed; the guard must trip.
+    monkeypatch.setattr(_verible, "_view_cache_too_old", lambda: True)
+
+    sentinel = {"tag": "direct-subprocess"}
+    monkeypatch.setattr(_verible, "_invoke_verible", lambda binary, path: sentinel)
+
+    assert _verible.parse_to_json(sv_file) is sentinel
+
+
+def test_view_cache_too_old_compares_against_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_view_cache_too_old`` must trip below the floor, clear at/above
+    it, and stay clear when the version metadata is unreadable."""
+    import importlib.metadata as md
+
+    monkeypatch.setattr(md, "version", lambda name: "0.2.0")
+    assert _verible._view_cache_too_old() is True
+
+    monkeypatch.setattr(md, "version", lambda name: "0.2.1")
+    assert _verible._view_cache_too_old() is False
+
+    monkeypatch.setattr(md, "version", lambda name: "0.3.0")
+    assert _verible._view_cache_too_old() is False
+
+    def _raise(name):
+        raise md.PackageNotFoundError(name)
+
+    monkeypatch.setattr(md, "version", _raise)
+    assert _verible._view_cache_too_old() is False
