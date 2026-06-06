@@ -324,7 +324,12 @@ def _resolve_bundle(
         for candidate in _try_paths(path, tb_prefix):
             try:
                 return waveform.get_signal_from_path(candidate)
-            except Exception:
+            except RuntimeError:
+                # pywellen raises RuntimeError("No var at path ...") on a
+                # genuine miss. Catch only that: anything else (e.g. the
+                # AttributeError from an incompatible pywellen rewriting
+                # the Waveform API, #52) must propagate loudly instead of
+                # masquerading as "signal not found in trace".
                 continue
         return None
 

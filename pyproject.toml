@@ -13,7 +13,10 @@ dependencies = [
     "typer>=0.25.1",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
-    "pywellen>=0.20.5",
+    # <0.25: pywellen 0.25.0 rewrote the Waveform API to a streaming
+    # surface, removing hierarchy/get_signal/get_signal_from_path that
+    # the ingest stage uses (#52). Lift the bound when ingest is ported.
+    "pywellen>=0.20.5,<0.25",
     "jinja2>=3.1.6",
 ]
 
