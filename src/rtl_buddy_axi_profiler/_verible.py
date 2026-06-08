@@ -13,11 +13,21 @@ differs from view's).
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from rtl_buddy_axi_profiler._verible_install import find_binary
+
+# Minimum rtl-buddy-view release whose ``cst_cache.get_or_compute`` API
+# we target. Kept in sync with the [verible] extra's floor in
+# pyproject.toml. The extra's ``>=`` floor guards pip/uv resolves, but
+# git/editable installs bypass it; ``parse_to_json`` repeats the floor at
+# import time so a too-old view falls back to the subprocess path instead
+# of calling a stale cache API.
+_VIEW_MIN_VERSION = "0.2.1"
 
 
 class VeribleUnavailable(RuntimeError):
@@ -26,6 +36,36 @@ class VeribleUnavailable(RuntimeError):
 
 class VeribleParseError(RuntimeError):
     """Raised when Verible could not produce a CST for a file."""
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Leading (major, minor, patch) ints of a PEP 440 version string.
+
+    Enough for a floor comparison; non-numeric suffixes (rc/dev/+local)
+    are dropped, so a pre-release of the floor compares equal to it.
+    """
+    parts = []
+    for segment in version.split(".")[:3]:
+        match = re.match(r"\d+", segment)
+        parts.append(int(match.group()) if match else 0)
+    return tuple(parts)
+
+
+def _view_cache_too_old() -> bool:
+    """True when an installed rtl-buddy-view predates ``_VIEW_MIN_VERSION``.
+
+    The [verible] extra's ``>=`` floor guards pip/uv resolves, but git
+    and editable installs bypass it. Returning ``True`` lets the caller
+    fall back to the direct subprocess path rather than driving a stale
+    ``cst_cache`` surface. Treated as not-too-old when the version can't
+    be read (no distribution metadata) — the import already succeeded, so
+    the resolve-time floor and that successful import stand in.
+    """
+    try:
+        installed = importlib.metadata.version("rtl-buddy-view")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return _version_tuple(installed) < _version_tuple(_VIEW_MIN_VERSION)
 
 
 def locate_binary(name: str = "verible-verilog-syntax") -> Path:
@@ -76,6 +116,12 @@ def parse_to_json(
         # Production callers should install the [verible] extra; this
         # path only matters when someone imports _verible without the
         # extra (e.g. unit tests pinned to a slim dep set).
+        return _invoke_verible(bin_path, path)
+    if _view_cache_too_old():
+        # A too-old view (git/editable install below the [verible] floor)
+        # may expose a stale ``get_or_compute`` signature. Skip the shared
+        # cache and parse directly rather than risk a mid-call
+        # AttributeError; upgrade rtl-buddy-view to re-enable the cache.
         return _invoke_verible(bin_path, path)
     return get_or_compute(
         path,
