@@ -48,8 +48,8 @@
         }
       },
       "throughput": {
-        "read_bps": 618357487.9227053,
-        "write_bps": 618357487.9227053
+        "read_bps": 616372391.6532905,
+        "write_bps": 616372391.6532905
       },
       "outstanding": {
         "read_peak": 1,
@@ -153,8 +153,8 @@
         }
       },
       "throughput": {
-        "read_bps": 125367286.97355533,
-        "write_bps": 125367286.97355533
+        "read_bps": 125122189.63831867,
+        "write_bps": 125122189.63831867
       },
       "outstanding": {
         "read_peak": 1,
@@ -258,8 +258,8 @@
         }
       },
       "throughput": {
-        "read_bps": 126669965.36368133,
-        "write_bps": 126669965.36368133
+        "read_bps": 126544735.54127532,
+        "write_bps": 126544735.54127532
       },
       "outstanding": {
         "read_peak": 1,
@@ -363,8 +363,8 @@
         }
       },
       "throughput": {
-        "read_bps": 70562293.27453142,
-        "write_bps": 70562293.27453142
+        "read_bps": 70510466.39735585,
+        "write_bps": 70510466.39735585
       },
       "outstanding": {
         "read_peak": 1,
@@ -431,23 +431,23 @@
   "interconnects": [
     {
       "node_path": "top.u_mem0",
-      "total_read_bps": 743724774.8962606,
-      "total_write_bps": 743724774.8962606,
+      "total_read_bps": 741494581.2916092,
+      "total_write_bps": 741494581.2916092,
       "hottest_master": "top.u_xbar.iface_cpu0_mem0",
       "hottest_slave": "top.u_mem0",
       "arbitration": {
-        "fairness_jain": 0.6947378120133789,
+        "fairness_jain": 0.6949636429082002,
         "starved_masters": []
       }
     },
     {
       "node_path": "top.u_mem1",
-      "total_read_bps": 197232258.63821274,
-      "total_write_bps": 197232258.63821274,
+      "total_read_bps": 197055201.93863118,
+      "total_write_bps": 197055201.93863118,
       "hottest_master": "top.u_xbar.iface_cpu0_mem1",
       "hottest_slave": "top.u_mem1",
       "arbitration": {
-        "fairness_jain": 0.925132625860122,
+        "fairness_jain": 0.9251895392906951,
         "starved_masters": []
       }
     }

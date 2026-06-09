@@ -48,8 +48,8 @@
         }
       },
       "throughput": {
-        "read_bps": 213927576.6016713,
-        "write_bps": 213927576.6016713
+        "read_bps": 212742382.27146813,
+        "write_bps": 212742382.27146813
       },
       "outstanding": {
         "read_peak": 1,
