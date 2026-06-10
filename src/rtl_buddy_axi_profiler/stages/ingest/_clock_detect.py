@@ -18,6 +18,7 @@ downstream latency / throughput math.
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass
 
 import pywellen
@@ -135,6 +136,49 @@ def _posedge_times(signal: pywellen.Signal) -> tuple[int, ...]:
             edges.append(t)
         prev = v
     return tuple(edges)
+
+
+def build_time_index(waveform: pywellen.Waveform) -> list[int]:
+    """Materialise the global time table (index -> trace time).
+
+    ``Waveform.time_table[k]`` returns the trace time at global
+    change-index ``k`` and ``None`` past the end. We need a posedge
+    time's *index* so the sampler can read a signal's pre-edge value
+    via ``Signal.value_at_idx`` (see ``_emit_events`` / issue #56).
+    Returns ``[]`` if the trace exposes no time table, in which case
+    the sampler falls back to ``value_at_time``.
+    """
+    tt = waveform.time_table
+    try:
+        if tt is None or tt[0] is None:
+            return []
+    except Exception:
+        return []
+    # Exponential search for an out-of-range index (tt[k] is None),
+    # then binary search for the last in-range index.
+    hi = 1
+    while tt[hi] is not None:
+        hi *= 2
+    lo, hi_bound = hi // 2, hi
+    while lo + 1 < hi_bound:
+        mid = (lo + hi_bound) // 2
+        if tt[mid] is not None:
+            lo = mid
+        else:
+            hi_bound = mid
+    return [tt[k] for k in range(lo + 1)]
+
+
+def preedge_index(times: list[int], t: int) -> int:
+    """Global time-table index of the entry immediately *before* trace
+    time ``t`` (a real change time such as a clock posedge).
+
+    Sampling a signal here yields the steady value the design's flops
+    see going into the edge at ``t`` — i.e. the AXI setup value — rather
+    than the post-edge value ``value_at_time(t)`` returns when a change
+    lands on ``t`` itself. Clamped to 0 for the first table entry.
+    """
+    return max(0, bisect.bisect_left(times, t) - 1)
 
 
 def _tick_to_fs(factor: int, unit: str) -> int:

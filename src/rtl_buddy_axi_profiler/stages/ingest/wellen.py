@@ -162,9 +162,17 @@ def _emit_events(
     the aggregate (transaction-only) can't compute.
     """
     timescale = waveform.hierarchy.timescale()
-    from rtl_buddy_axi_profiler.stages.ingest._clock_detect import _tick_to_fs
+    from rtl_buddy_axi_profiler.stages.ingest._clock_detect import (
+        _tick_to_fs,
+        build_time_index,
+        preedge_index,
+    )
 
     tick_fs = _tick_to_fs(timescale.factor, timescale.unit)
+    # Global time table (index -> trace time) so each posedge can be
+    # sampled at its pre-edge entry via value_at_idx. Empty (no time
+    # table) -> _sample_bundle falls back to value_at_time(tick).
+    times = build_time_index(waveform)
 
     # Build a sorted (tick, bundle_index) event list across all
     # bundle clocks so the output stream is monotonic in t_fs.
@@ -177,7 +185,13 @@ def _emit_events(
     for tick, idx in events:
         bs = bundle_clocks[idx][0]
         t_fs = tick * tick_fs
-        yield from _sample_bundle(bs, tick, t_fs, channel_acc)
+        # Sample the values the design's flops latch at this posedge: the
+        # time-table entry just before the edge. value_at_time(tick)
+        # returns the *post*-edge value, so a single-cycle handshake whose
+        # READY deasserts as the transfer completes reads valid&&!ready
+        # -> 0 txns / 100% backpressure (issue #56).
+        sidx = preedge_index(times, tick) if times else None
+        yield from _sample_bundle(bs, tick, sidx, t_fs, channel_acc)
 
 
 def _bump(channel_acc: dict | None, bundle: str, ch: Channel, v: bool, r: bool) -> None:
@@ -195,83 +209,92 @@ def _bump(channel_acc: dict | None, bundle: str, ch: Channel, v: bool, r: bool) 
 
 
 def _sample_bundle(
-    bs: _BundleSignals, tick: int, t_fs: int, channel_acc: dict | None = None
+    bs: _BundleSignals,
+    tick: int,
+    sidx: int | None,
+    t_fs: int,
+    channel_acc: dict | None = None,
 ) -> Iterator[HandshakeEvent]:
     """For one bundle at one clock posedge: tally each channel's
     valid/ready occupancy (for util%/bp%) and emit a HandshakeEvent on
-    each channel where valid && ready hold simultaneously."""
+    each channel where valid && ready hold simultaneously.
+
+    Signals are read at ``sidx`` (the pre-edge time-table index) when
+    available, else at ``tick`` via ``value_at_time`` — see
+    ``_emit_events`` / issue #56."""
     name = bs.bundle.name
 
-    arv, arr = _high(bs.arvalid, tick), _high(bs.arready, tick)
+    arv, arr = _high(bs.arvalid, tick, sidx), _high(bs.arready, tick, sidx)
     _bump(channel_acc, name, Channel.AR, arv, arr)
     if arv and arr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.AR,
-            txn_id=_int_at(bs.arid, tick),
-            addr=_int_at(bs.araddr, tick),
-            len_beats=_int_at(bs.arlen, tick),
-            size_log2=_int_at(bs.arsize, tick),
+            txn_id=_int_at(bs.arid, tick, sidx),
+            addr=_int_at(bs.araddr, tick, sidx),
+            len_beats=_int_at(bs.arlen, tick, sidx),
+            size_log2=_int_at(bs.arsize, tick, sidx),
         )
 
-    awv, awr = _high(bs.awvalid, tick), _high(bs.awready, tick)
+    awv, awr = _high(bs.awvalid, tick, sidx), _high(bs.awready, tick, sidx)
     _bump(channel_acc, name, Channel.AW, awv, awr)
     if awv and awr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.AW,
-            txn_id=_int_at(bs.awid, tick),
-            addr=_int_at(bs.awaddr, tick),
-            len_beats=_int_at(bs.awlen, tick),
-            size_log2=_int_at(bs.awsize, tick),
+            txn_id=_int_at(bs.awid, tick, sidx),
+            addr=_int_at(bs.awaddr, tick, sidx),
+            len_beats=_int_at(bs.awlen, tick, sidx),
+            size_log2=_int_at(bs.awsize, tick, sidx),
         )
 
-    rv, rr = _high(bs.rvalid, tick), _high(bs.rready, tick)
+    rv, rr = _high(bs.rvalid, tick, sidx), _high(bs.rready, tick, sidx)
     _bump(channel_acc, name, Channel.R, rv, rr)
     if rv and rr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.R,
-            txn_id=_int_at(bs.rid, tick),
-            resp=_int_at(bs.rresp, tick),
-            last=bool(_int_at(bs.rlast, tick)),
+            txn_id=_int_at(bs.rid, tick, sidx),
+            resp=_int_at(bs.rresp, tick, sidx),
+            last=bool(_int_at(bs.rlast, tick, sidx)),
         )
 
-    wv, wr = _high(bs.wvalid, tick), _high(bs.wready, tick)
+    wv, wr = _high(bs.wvalid, tick, sidx), _high(bs.wready, tick, sidx)
     _bump(channel_acc, name, Channel.W, wv, wr)
     if wv and wr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.W,
-            last=bool(_int_at(bs.wlast, tick)),
+            last=bool(_int_at(bs.wlast, tick, sidx)),
         )
 
-    bv, br = _high(bs.bvalid, tick), _high(bs.bready, tick)
+    bv, br = _high(bs.bvalid, tick, sidx), _high(bs.bready, tick, sidx)
     _bump(channel_acc, name, Channel.B, bv, br)
     if bv and br:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.B,
-            txn_id=_int_at(bs.bid, tick),
-            resp=_int_at(bs.bresp, tick),
+            txn_id=_int_at(bs.bid, tick, sidx),
+            resp=_int_at(bs.bresp, tick, sidx),
         )
 
 
-def _high(signal: pywellen.Signal, tick: int) -> bool:
-    """True iff the signal's value at ``tick`` is 1."""
-    val = signal.value_at_time(tick)
+def _high(signal: pywellen.Signal, tick: int, sidx: int | None = None) -> bool:
+    """True iff the signal's value is 1 at the pre-edge index ``sidx``
+    (preferred) or, as a fallback, at trace time ``tick``."""
+    val = signal.value_at_idx(sidx) if sidx is not None else signal.value_at_time(tick)
     return _to_int(val) == 1
 
 
-def _int_at(signal: pywellen.Signal | None, tick: int) -> int:
+def _int_at(signal: pywellen.Signal | None, tick: int, sidx: int | None = None) -> int:
     if signal is None:
         return 0
-    val = signal.value_at_time(tick)
+    val = signal.value_at_idx(sidx) if sidx is not None else signal.value_at_time(tick)
     return _to_int(val)
 
 
