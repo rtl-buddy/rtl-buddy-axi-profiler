@@ -148,6 +148,8 @@ class BundleStats:
 
     bundle: Bundle
     channels: dict[Channel, ChannelStats] = field(default_factory=dict)
+    # Throughput in BITS per second (data bytes x 8 / elapsed); bits, not
+    # bytes — divide by 8 for B/s. Decimal (SI) scale. See _finalize().
     read_bps: float = 0.0
     write_bps: float = 0.0
     read_peak: int = 0
@@ -166,6 +168,7 @@ class InterconnectStats:
     """Per-interconnect-node roll-up. Computed after per-bundle aggregation."""
 
     node_path: str
+    # Sum of member bundles' read_bps/write_bps. BITS per second (÷8 for B/s).
     total_read_bps: float = 0.0
     total_write_bps: float = 0.0
     hottest_master: str = ""

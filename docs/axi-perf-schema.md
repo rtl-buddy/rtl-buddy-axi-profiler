@@ -66,6 +66,12 @@ Five sub-objects, one per channel. AR / AW / B are request-style (carry `txns`);
 | `txns`     | int    | (AR/AW/B only) completed transaction count        |
 | `beats`    | int    | (R/W only) completed beat count                   |
 
+### Throughput (`read_bps` / `write_bps`, `total_read_bps` / `total_write_bps`)
+
+**Units: BITS per second** — `data_bytes × 8 / elapsed_time` (see `aggregate/standard.py::_finalize`). The field name is `*_bps` (bits), **not** `*_Bps` (bytes). Consumers that want bytes/s should divide by 8; for a human-facing **MB/s / GB/s** display use **decimal** SI (`÷1e6` / `÷1e9`), not binary (MiB/GiB) — bandwidth is a rate, and bus/interconnect bandwidth is conventionally reported in decimal bytes/s.
+
+> Note: bits/s is the serial-link convention; a parallel AXI bus is more idiomatically reported in bytes/s. The field stays bits/s for v1 (changing it is a breaking schema change); the unit is documented here and in the JSON schema `description`s so consumers convert correctly.
+
 ### Latency `hist_log2`
 
 A fixed 16-bucket log-spaced histogram over latency in cycles. Bucket `i` covers `[2^i, 2^(i+1))` cycles, clamped to `[0, 15]`. Counts are integers.
