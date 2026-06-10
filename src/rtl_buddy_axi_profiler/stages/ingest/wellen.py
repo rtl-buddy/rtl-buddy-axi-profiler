@@ -291,9 +291,7 @@ def _high(signal: pywellen.Signal, tick: int, sidx: int | None = None) -> bool:
     return _to_int(val) == 1
 
 
-def _int_at(
-    signal: pywellen.Signal | None, tick: int, sidx: int | None = None
-) -> int:
+def _int_at(signal: pywellen.Signal | None, tick: int, sidx: int | None = None) -> int:
     if signal is None:
         return 0
     val = signal.value_at_idx(sidx) if sidx is not None else signal.value_at_time(tick)

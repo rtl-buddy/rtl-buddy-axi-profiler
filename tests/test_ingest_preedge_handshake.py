@@ -24,6 +24,7 @@ from tests.fixtures.e2e._build import (
     manifest_from,
 )
 
+
 # Clock posedges land at t = 5, 15, 25, ... (half_period 5ns); negedges at
 # 0, 10, 20, ... See emit_clock.
 def _single_cycle_handshake_vcd(tmp_path) -> tuple[str, object]:
@@ -49,7 +50,7 @@ def _single_cycle_handshake_vcd(tmp_path) -> tuple[str, object]:
     # [10,20); ready drops *on* the accepting posedge (t=15).
     drive("awready", 2, 1)
     drive("awvalid", 10, 1)
-    drive("awready", 15, 0)   # consumed at the posedge -> post-edge reads 0
+    drive("awready", 15, 0)  # consumed at the posedge -> post-edge reads 0
     drive("awvalid", 20, 0)
 
     # AR: same shape one cycle later (accept at posedge t=25).
