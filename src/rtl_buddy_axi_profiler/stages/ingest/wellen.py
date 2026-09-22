@@ -14,6 +14,12 @@ Path resolution: signal paths in the manifest must match the trace's
 fully-qualified paths. ``tb_prefix`` stripping (rtl-buddy-view #21)
 is a follow-up; for v1, regenerate the manifest from inside the
 testbench scope if your sim wraps the design.
+
+pywellen API: this module drives the >=0.25 random-access getters —
+``wf[path]`` / ``Var.signal`` / ``Signal.value_at`` / ``sig[:]`` — not
+the streaming API, which panicked with an index-out-of-bounds through
+0.25.2 and doesn't fit per-posedge sampling anyway. See
+``_pywellen_compat`` for the guard and the history (#52, #59).
 """
 
 from __future__ import annotations
@@ -27,8 +33,15 @@ import pywellen
 from rtl_buddy_axi_profiler.stages.ingest._clock_detect import (
     ClockDetectError,
     DetectedClock,
+    _tick_to_fs,
     detect_global_clock,
     resolve_bundle_clock,
+)
+from rtl_buddy_axi_profiler.stages.ingest._pywellen_compat import (
+    PywellenApiError,
+    lookup_signal,
+    preedge_time,
+    require_random_access_api,
 )
 from rtl_buddy_axi_profiler.types import (
     Bundle,
@@ -70,7 +83,20 @@ class _BundleSignals:
 
 
 class WellenIngestError(RuntimeError):
-    """Raised when the trace can't be opened or a manifest signal is missing."""
+    """Raised when the trace can't be opened or a manifest signal is missing.
+
+    Deliberately *not* the error an incompatible pywellen produces —
+    that is :class:`PywellenApiError`, re-exported here for callers,
+    so a dependency break never reads as a bad manifest (#52).
+    """
+
+
+__all__ = [
+    "PywellenApiError",
+    "WellenIngest",
+    "WellenIngestError",
+    "ingest",
+]
 
 
 def ingest(
@@ -89,6 +115,9 @@ def ingest(
 
     See :class:`WellenIngest` for the entry-point class wrapper.
     """
+    # Before the first Waveform touch, so an out-of-range pywellen names
+    # itself instead of dying on whichever getter vanished first (#52).
+    require_random_access_api()
     try:
         waveform = pywellen.Waveform(str(source))
     except Exception as e:
@@ -161,18 +190,8 @@ def _emit_events(
     pipeline drains to fill ChannelStats util%/bp%/txns/beats, which
     the aggregate (transaction-only) can't compute.
     """
-    timescale = waveform.hierarchy.timescale()
-    from rtl_buddy_axi_profiler.stages.ingest._clock_detect import (
-        _tick_to_fs,
-        build_time_index,
-        preedge_index,
-    )
-
+    timescale = waveform.timescale
     tick_fs = _tick_to_fs(timescale.factor, timescale.unit)
-    # Global time table (index -> trace time) so each posedge can be
-    # sampled at its pre-edge entry via value_at_idx. Empty (no time
-    # table) -> _sample_bundle falls back to value_at_time(tick).
-    times = build_time_index(waveform)
 
     # Build a sorted (tick, bundle_index) event list across all
     # bundle clocks so the output stream is monotonic in t_fs.
@@ -185,13 +204,12 @@ def _emit_events(
     for tick, idx in events:
         bs = bundle_clocks[idx][0]
         t_fs = tick * tick_fs
-        # Sample the values the design's flops latch at this posedge: the
-        # time-table entry just before the edge. value_at_time(tick)
-        # returns the *post*-edge value, so a single-cycle handshake whose
-        # READY deasserts as the transfer completes reads valid&&!ready
-        # -> 0 txns / 100% backpressure (issue #56).
-        sidx = preedge_index(times, tick) if times else None
-        yield from _sample_bundle(bs, tick, sidx, t_fs, channel_acc)
+        # Sample the values the design's flops latch at this posedge: one
+        # tick before the edge. value_at(tick) returns the *post*-edge
+        # value, so a single-cycle handshake whose READY deasserts as the
+        # transfer completes reads valid&&!ready -> 0 txns / 100%
+        # backpressure (issue #56).
+        yield from _sample_bundle(bs, preedge_time(tick), t_fs, channel_acc)
 
 
 def _bump(channel_acc: dict | None, bundle: str, ch: Channel, v: bool, r: bool) -> None:
@@ -210,8 +228,7 @@ def _bump(channel_acc: dict | None, bundle: str, ch: Channel, v: bool, r: bool) 
 
 def _sample_bundle(
     bs: _BundleSignals,
-    tick: int,
-    sidx: int | None,
+    t: int,
     t_fs: int,
     channel_acc: dict | None = None,
 ) -> Iterator[HandshakeEvent]:
@@ -219,83 +236,80 @@ def _sample_bundle(
     valid/ready occupancy (for util%/bp%) and emit a HandshakeEvent on
     each channel where valid && ready hold simultaneously.
 
-    Signals are read at ``sidx`` (the pre-edge time-table index) when
-    available, else at ``tick`` via ``value_at_time`` — see
-    ``_emit_events`` / issue #56."""
+    ``t`` is the *pre-edge* trace time (``preedge_time(posedge)``), not
+    the posedge itself — see ``_emit_events`` / issue #56. ``t_fs`` is
+    the posedge's own time, which is what the event carries."""
     name = bs.bundle.name
 
-    arv, arr = _high(bs.arvalid, tick, sidx), _high(bs.arready, tick, sidx)
+    arv, arr = _high(bs.arvalid, t), _high(bs.arready, t)
     _bump(channel_acc, name, Channel.AR, arv, arr)
     if arv and arr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.AR,
-            txn_id=_int_at(bs.arid, tick, sidx),
-            addr=_int_at(bs.araddr, tick, sidx),
-            len_beats=_int_at(bs.arlen, tick, sidx),
-            size_log2=_int_at(bs.arsize, tick, sidx),
+            txn_id=_int_at(bs.arid, t),
+            addr=_int_at(bs.araddr, t),
+            len_beats=_int_at(bs.arlen, t),
+            size_log2=_int_at(bs.arsize, t),
         )
 
-    awv, awr = _high(bs.awvalid, tick, sidx), _high(bs.awready, tick, sidx)
+    awv, awr = _high(bs.awvalid, t), _high(bs.awready, t)
     _bump(channel_acc, name, Channel.AW, awv, awr)
     if awv and awr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.AW,
-            txn_id=_int_at(bs.awid, tick, sidx),
-            addr=_int_at(bs.awaddr, tick, sidx),
-            len_beats=_int_at(bs.awlen, tick, sidx),
-            size_log2=_int_at(bs.awsize, tick, sidx),
+            txn_id=_int_at(bs.awid, t),
+            addr=_int_at(bs.awaddr, t),
+            len_beats=_int_at(bs.awlen, t),
+            size_log2=_int_at(bs.awsize, t),
         )
 
-    rv, rr = _high(bs.rvalid, tick, sidx), _high(bs.rready, tick, sidx)
+    rv, rr = _high(bs.rvalid, t), _high(bs.rready, t)
     _bump(channel_acc, name, Channel.R, rv, rr)
     if rv and rr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.R,
-            txn_id=_int_at(bs.rid, tick, sidx),
-            resp=_int_at(bs.rresp, tick, sidx),
-            last=bool(_int_at(bs.rlast, tick, sidx)),
+            txn_id=_int_at(bs.rid, t),
+            resp=_int_at(bs.rresp, t),
+            last=bool(_int_at(bs.rlast, t)),
         )
 
-    wv, wr = _high(bs.wvalid, tick, sidx), _high(bs.wready, tick, sidx)
+    wv, wr = _high(bs.wvalid, t), _high(bs.wready, t)
     _bump(channel_acc, name, Channel.W, wv, wr)
     if wv and wr:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.W,
-            last=bool(_int_at(bs.wlast, tick, sidx)),
+            last=bool(_int_at(bs.wlast, t)),
         )
 
-    bv, br = _high(bs.bvalid, tick, sidx), _high(bs.bready, tick, sidx)
+    bv, br = _high(bs.bvalid, t), _high(bs.bready, t)
     _bump(channel_acc, name, Channel.B, bv, br)
     if bv and br:
         yield HandshakeEvent(
             t_fs=t_fs,
             bundle_name=name,
             channel=Channel.B,
-            txn_id=_int_at(bs.bid, tick, sidx),
-            resp=_int_at(bs.bresp, tick, sidx),
+            txn_id=_int_at(bs.bid, t),
+            resp=_int_at(bs.bresp, t),
         )
 
 
-def _high(signal: pywellen.Signal, tick: int, sidx: int | None = None) -> bool:
-    """True iff the signal's value is 1 at the pre-edge index ``sidx``
-    (preferred) or, as a fallback, at trace time ``tick``."""
-    val = signal.value_at_idx(sidx) if sidx is not None else signal.value_at_time(tick)
-    return _to_int(val) == 1
+def _high(signal: pywellen.Signal, t: int) -> bool:
+    """True iff the signal's value is 1 at trace time ``t``."""
+    return _to_int(signal.value_at(t)) == 1
 
 
-def _int_at(signal: pywellen.Signal | None, tick: int, sidx: int | None = None) -> int:
+def _int_at(signal: pywellen.Signal | None, t: int) -> int:
     if signal is None:
         return 0
-    val = signal.value_at_idx(sidx) if sidx is not None else signal.value_at_time(tick)
-    return _to_int(val)
+    return _to_int(signal.value_at(t))
 
 
 def _to_int(value) -> int:
@@ -345,15 +359,12 @@ def _resolve_bundle(
 ) -> _BundleSignals:
     def _lookup(path: str) -> pywellen.Signal | None:
         for candidate in _try_paths(path, tb_prefix):
-            try:
-                return waveform.get_signal_from_path(candidate)
-            except RuntimeError:
-                # pywellen raises RuntimeError("No var at path ...") on a
-                # genuine miss. Catch only that: anything else (e.g. the
-                # AttributeError from an incompatible pywellen rewriting
-                # the Waveform API, #52) must propagate loudly instead of
-                # masquerading as "signal not found in trace".
-                continue
+            # lookup_signal narrows the miss to pywellen's KeyError, so an
+            # incompatible pywellen propagates loudly instead of
+            # masquerading as "signal not found in trace" (#52).
+            sig = lookup_signal(waveform, candidate)
+            if sig is not None:
+                return sig
         return None
 
     def required(role: str) -> pywellen.Signal:
@@ -446,6 +457,8 @@ class WellenIngest:
         return self._bundle_clocks
 
     def run(self, source: Path, manifest: Manifest) -> Iterator[HandshakeEvent]:
+        # Same up-front guard as the module-level ``ingest`` (#52).
+        require_random_access_api()
         try:
             waveform = pywellen.Waveform(str(source))
         except Exception as e:

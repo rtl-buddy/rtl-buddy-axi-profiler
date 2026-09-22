@@ -1,6 +1,6 @@
 [project]
 name = "rtl-buddy-axi-profiler"
-version = "0.1.0"
+version = "0.2.0"
 description = "AXI / APB / AHB interconnect performance profiler; consumed by rtl-buddy-view's axi-perf overlay."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -13,10 +13,17 @@ dependencies = [
     "typer>=0.25.1",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
-    # <0.25: pywellen 0.25.0 rewrote the Waveform API to a streaming
-    # surface, removing hierarchy/get_signal/get_signal_from_path that
-    # the ingest stage uses (#52). Lift the bound when ingest is ported.
-    "pywellen>=0.20.5,<0.25",
+    # Two-sided on purpose: pywellen is pre-1.0 and 0.25.0 already
+    # rewrote the whole Waveform surface once (dropping the
+    # hierarchy/get_signal/get_signal_from_path API the ingest was
+    # built on — #52). The ingest now drives the 0.25 random-access
+    # getters (wf[path] / Var.signal / Signal.value_at / sig[:]); the
+    # floor is the release carrying the upstream streaming fix plus
+    # its follow-ups, and the cap keeps the next rewrite out of the
+    # field instead of letting it resolve into a fresh install (#59).
+    # Matches rtl_buddy's own pin (rtl_buddy#268) so the two are
+    # co-installable in the project template.
+    "pywellen>=0.25.6,<0.26",
     "jinja2>=3.1.6",
 ]
 
