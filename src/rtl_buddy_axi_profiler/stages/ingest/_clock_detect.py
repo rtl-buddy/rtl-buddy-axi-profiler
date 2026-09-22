@@ -14,14 +14,19 @@ Two paths:
 
 The clock's period (in fs) becomes the cycle-count basis for all
 downstream latency / throughput math.
+
+pywellen API: this module drives the >=0.25 random-access surface —
+``wf.timescale`` / ``wf.all_vars()`` / ``wf[path]`` / ``Var.signal`` /
+``sig[:]``. See ``_pywellen_compat`` for the guard and the history.
 """
 
 from __future__ import annotations
 
-import bisect
 from dataclasses import dataclass
 
 import pywellen
+
+from rtl_buddy_axi_profiler.stages.ingest._pywellen_compat import lookup_signal
 
 
 @dataclass(frozen=True)
@@ -49,17 +54,20 @@ def detect_global_clock(waveform: pywellen.Waveform) -> DetectedClock:
     has only a single bit-toggling signal still returns it (so a
     minimal single-clock fixture works).
     """
-    timescale = waveform.hierarchy.timescale()
+    timescale = waveform.timescale
     if timescale is None:
         raise ClockDetectError("trace has no timescale; cannot derive a clock period.")
     tick_fs = _tick_to_fs(timescale.factor, timescale.unit)
 
     best: tuple[int, str, tuple[int, ...]] | None = None
-    for var in waveform.hierarchy.all_vars():
-        if var.bitwidth() != 1:
+    for var in waveform.all_vars():
+        # >=0.25: bitwidth / full_name / signal are zero-arg properties
+        # (they took the hierarchy as an argument before). bitwidth is
+        # None for reals and strings, which `!= 1` filters out too.
+        if var.bitwidth != 1:
             continue
-        name = var.full_name(waveform.hierarchy)
-        sig = waveform.get_signal(var)
+        name = var.full_name
+        sig = var.signal
         posedges = _posedge_times(sig)
         if len(posedges) < 2:
             continue
@@ -94,21 +102,17 @@ def resolve_bundle_clock(
     if the signal isn't in the trace, isn't 1-bit, or has fewer
     than two posedges.
     """
-    timescale = waveform.hierarchy.timescale()
+    timescale = waveform.timescale
     if timescale is None:
         raise ClockDetectError("trace has no timescale; cannot derive a clock period.")
     tick_fs = _tick_to_fs(timescale.factor, timescale.unit)
 
-    try:
-        sig = waveform.get_signal_from_path(clock_signal_path)
-    except RuntimeError:
-        # pywellen's genuine-miss exception; an incompatible pywellen
-        # (e.g. the 0.25 API rewrite, #52) raises AttributeError instead
-        # and must propagate rather than read as a bad clock_signal.
+    sig = lookup_signal(waveform, clock_signal_path)
+    if sig is None:
         raise ClockDetectError(
             f"clock signal {clock_signal_path!r} not found in trace; "
             f"check the bundle's clock_signal against the trace's hierarchy."
-        ) from None
+        )
 
     posedges = _posedge_times(sig)
     if len(posedges) < 2:
@@ -128,57 +132,24 @@ def _posedge_times(signal: pywellen.Signal) -> tuple[int, ...]:
     """Return (time, ...) for every 0 → 1 transition on a 1-bit signal."""
     edges: list[int] = []
     prev: int | None = None
-    for t, value in signal.all_changes():
-        # Wellen yields int values for 1-bit signals; multibit returns
-        # the bit-string. We only call this on 1-bit signals.
-        v = int(value) if not isinstance(value, int) else value
+    # ``sig[:]`` is the >=0.25 change vector: a time-ordered list of
+    # ``(int time, value)``. It replaces ``Signal.all_changes()``.
+    for t, value in signal[:]:
+        # Wellen yields int values for fully-2-state samples; an x/z bit
+        # comes back as a bit-string. A clock candidate that is ever x/z
+        # isn't 0 or 1 at that sample, so int() would raise — map it to a
+        # sentinel that can't form a posedge instead.
+        if isinstance(value, int):
+            v: int = value
+        else:
+            try:
+                v = int(str(value), 2)
+            except ValueError:
+                v = -1
         if prev == 0 and v == 1:
             edges.append(t)
         prev = v
     return tuple(edges)
-
-
-def build_time_index(waveform: pywellen.Waveform) -> list[int]:
-    """Materialise the global time table (index -> trace time).
-
-    ``Waveform.time_table[k]`` returns the trace time at global
-    change-index ``k`` and ``None`` past the end. We need a posedge
-    time's *index* so the sampler can read a signal's pre-edge value
-    via ``Signal.value_at_idx`` (see ``_emit_events`` / issue #56).
-    Returns ``[]`` if the trace exposes no time table, in which case
-    the sampler falls back to ``value_at_time``.
-    """
-    tt = waveform.time_table
-    try:
-        if tt is None or tt[0] is None:
-            return []
-    except Exception:
-        return []
-    # Exponential search for an out-of-range index (tt[k] is None),
-    # then binary search for the last in-range index.
-    hi = 1
-    while tt[hi] is not None:
-        hi *= 2
-    lo, hi_bound = hi // 2, hi
-    while lo + 1 < hi_bound:
-        mid = (lo + hi_bound) // 2
-        if tt[mid] is not None:
-            lo = mid
-        else:
-            hi_bound = mid
-    return [tt[k] for k in range(lo + 1)]
-
-
-def preedge_index(times: list[int], t: int) -> int:
-    """Global time-table index of the entry immediately *before* trace
-    time ``t`` (a real change time such as a clock posedge).
-
-    Sampling a signal here yields the steady value the design's flops
-    see going into the edge at ``t`` — i.e. the AXI setup value — rather
-    than the post-edge value ``value_at_time(t)`` returns when a change
-    lands on ``t`` itself. Clamped to 0 for the first table entry.
-    """
-    return max(0, bisect.bisect_left(times, t) - 1)
 
 
 def _tick_to_fs(factor: int, unit: str) -> int:

@@ -84,6 +84,7 @@ def run(
     )
     from rtl_buddy_axi_profiler.stages.emit.json_v1 import emit as _emit
     from rtl_buddy_axi_profiler.stages.ingest.wellen import (
+        PywellenApiError,
         WellenIngest,
         WellenIngestError,
     )
@@ -200,6 +201,11 @@ def run(
                 typer.echo(str(e), err=True)
                 raise typer.Exit(code=2) from None
             typer.echo(f"wrote {parquet_target} ({len(txns_list)} txns).", err=True)
+    except PywellenApiError as e:
+        # A dependency break, not a manifest problem — say so plainly
+        # rather than letting it surface as "ingest failed" (#52, #59).
+        typer.echo(f"incompatible pywellen: {e}", err=True)
+        raise typer.Exit(code=1) from None
     except WellenIngestError as e:
         typer.echo(f"ingest failed: {e}", err=True)
         raise typer.Exit(code=1) from None
